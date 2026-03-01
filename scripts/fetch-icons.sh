@@ -35,7 +35,7 @@ for theme in Papirus breeze hicolor Adwaita AdwaitaLegacy locolor; do
     done
 done
 
-SIZE_DIRS=(scalable 96x96 64x64 48x48 32x32)
+SIZE_DIRS=(scalable 256x256 128x128 96x96 64x64 48x48 32x32)
 
 local_lookup() {
     local name="$1"
