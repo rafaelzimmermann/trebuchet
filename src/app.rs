@@ -1,7 +1,7 @@
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use iced::{
     event,
-    keyboard::{self, key::Named, Key, Modifiers},
+    keyboard::{self, key::Named, Key},
     widget::{column, container},
     Element, Event, Length, Subscription, Task,
 };
@@ -24,7 +24,7 @@ pub struct Trebuchet {
 pub enum Message {
     SearchChanged(String),
     AppActivated(usize),
-    KeyPressed(Key, Modifiers),
+    KeyPressed(Key),
 }
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
@@ -69,7 +69,7 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 std::process::exit(0);
             }
         }
-        Message::KeyPressed(key, _) => {
+        Message::KeyPressed(key) => {
             if key == Key::Named(Named::Escape) {
                 std::process::exit(0);
             }
@@ -84,8 +84,8 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         search_bar(&state.query),
         app_grid(&state.apps, &state.filtered, &state.config),
     ]
-    .spacing(20)
-    .padding(40);
+    .spacing(16)
+    .padding(24);
 
     container(content)
         .width(Length::Fill)
@@ -97,9 +97,8 @@ fn on_event(event: Event, _status: Status, _id: iced::window::Id) -> Option<Mess
     match event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             key: Key::Named(Named::Escape),
-            modifiers,
             ..
-        }) => Some(Message::KeyPressed(Key::Named(Named::Escape), modifiers)),
+        }) => Some(Message::KeyPressed(Key::Named(Named::Escape))),
         _ => None,
     }
 }

@@ -11,10 +11,10 @@ mod ui;
 
 fn main() -> iced_layershell::Result {
     let layer_settings = LayerShellSettings {
-        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+        anchor: Anchor::empty(),
         layer: Layer::Overlay,
-        exclusive_zone: -1,
-        size: None,
+        exclusive_zone: 0,
+        size: Some((960, 640)),
         margin: (0, 0, 0, 0),
         keyboard_interactivity: KeyboardInteractivity::Exclusive,
         start_mode: StartMode::Active,
