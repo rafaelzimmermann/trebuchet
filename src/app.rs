@@ -5,7 +5,7 @@ use iced::{
     keyboard::{self, key::Named, Key},
     mouse,
     widget::{button, column, container, row, text},
-    Color, Element, Event, Length, Subscription, Task,
+    Background, Border, Color, Element, Event, Length, Subscription, Task,
 };
 use iced::event::Status;
 use iced_layershell::to_layer_message;
@@ -145,7 +145,7 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         .width(Length::Fill)
         .align_x(alignment::Horizontal::Center);
 
-    column![
+    let content = column![
         search_bar(&state.query),
         app_grid(&state.apps, page_slice, &state.config),
         pagination,
@@ -153,8 +153,25 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     .spacing(16)
     .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
     .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    .height(Length::Fill);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(Color {
+                r: 0.08,
+                g: 0.08,
+                b: 0.12,
+                a: 0.92,
+            })),
+            border: Border {
+                radius: 16.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
 fn pages(total: usize, page_size: usize) -> usize {
