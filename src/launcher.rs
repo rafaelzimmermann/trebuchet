@@ -75,25 +75,58 @@ pub fn scan_applications() -> Vec<AppEntry> {
 }
 
 fn resolve_icon(icon_name: &str) -> Option<PathBuf> {
+    // Absolute path in the .desktop file — use as-is.
     let p = PathBuf::from(icon_name);
     if p.is_absolute() && p.exists() {
         return Some(p);
     }
 
+    // Bundled assets: checked before system paths so our high-res icons win.
+    //
+    // 1. Relative to CWD — works with `cargo run` from the project root.
+    // 2. Relative to the running binary — works for an installed copy that
+    //    keeps `assets/icons/` next to the executable.
+    // 3. ../share/trebuchet/icons/ — FHS layout
+    //    (binary in /usr/local/bin, data in /usr/local/share/trebuchet/icons).
+    let asset_roots: Vec<PathBuf> = {
+        let mut roots = vec![PathBuf::from(".")];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                roots.push(dir.to_path_buf());
+                if let Some(parent) = dir.parent() {
+                    roots.push(parent.join("share/trebuchet"));
+                }
+            }
+        }
+        roots
+    };
+
+    for root in &asset_roots {
+        for ext in ["svg", "png"] {
+            let candidate = root.join("assets/icons").join(format!("{icon_name}.{ext}"));
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // System icon theme paths — SVG preferred over PNG for quality.
     let home = std::env::var("HOME").unwrap_or_default();
-    let search_dirs = [
-        format!("{home}/.local/share/icons/hicolor/96x96/apps"),
-        format!("{home}/.local/share/icons/hicolor/48x48/apps"),
+    let system_dirs = [
         format!("{home}/.local/share/icons/hicolor/scalable/apps"),
+        format!("{home}/.local/share/icons/hicolor/96x96/apps"),
+        format!("{home}/.local/share/icons/hicolor/64x64/apps"),
+        format!("{home}/.local/share/icons/hicolor/48x48/apps"),
         format!("{home}/.local/share/icons"),
-        "/usr/share/icons/hicolor/96x96/apps".to_string(),
-        "/usr/share/icons/hicolor/48x48/apps".to_string(),
         "/usr/share/icons/hicolor/scalable/apps".to_string(),
+        "/usr/share/icons/hicolor/96x96/apps".to_string(),
+        "/usr/share/icons/hicolor/64x64/apps".to_string(),
+        "/usr/share/icons/hicolor/48x48/apps".to_string(),
         "/usr/share/pixmaps".to_string(),
     ];
 
-    for dir in &search_dirs {
-        for ext in ["png", "svg"] {
+    for dir in &system_dirs {
+        for ext in ["svg", "png"] {
             let candidate = PathBuf::from(dir).join(format!("{icon_name}.{ext}"));
             if candidate.exists() {
                 return Some(candidate);

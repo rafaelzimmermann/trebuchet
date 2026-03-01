@@ -17,7 +17,27 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - A Wayland compositor supporting the `wlr-layer-shell` protocol (e.g. Hyprland, Sway)
 - Rust toolchain (stable, 2021 edition or later)
 
-## Build
+## Setup
+
+### 1. Fetch bundled icons (recommended)
+
+trebuchet ships a script that populates `assets/icons/` with high-resolution SVGs
+for ~80 common applications. It checks locally installed icon themes first
+(Papirus, Breeze, hicolor …) and falls back to downloading from
+[Papirus on GitHub](https://github.com/PapirusIconTheme/papirus-icon-theme) (GPL-3.0).
+
+```sh
+bash scripts/fetch-icons.sh
+```
+
+These icons take priority over the system icon theme at runtime, so lower-resolution
+or missing system icons are automatically covered. The fetched files are excluded from
+version control (see `.gitignore`).
+
+If you have Papirus installed (`pacman -S papirus-icon-theme` / `apt install papirus-icon-theme`),
+the script works entirely offline.
+
+### 2. Build
 
 ```sh
 cargo build --release
