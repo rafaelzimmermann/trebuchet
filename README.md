@@ -19,9 +19,45 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - A Wayland compositor supporting the `wlr-layer-shell` protocol (e.g. Hyprland, Sway)
 - Rust toolchain (stable, 2021 edition or later)
 
-## Setup
+## Install
 
-### 1. Fetch bundled icons (recommended)
+Clone the repository and run the install script:
+
+```sh
+git clone https://github.com/rafaelzimmermann/trebuchet.git
+cd trebuchet
+bash scripts/install.sh
+```
+
+This builds a release binary and installs it to `~/.local/bin`. To install system-wide to `/usr/local/bin` instead:
+
+```sh
+bash scripts/install.sh --system
+```
+
+To also fetch high-resolution icons for ~80 common apps before installing:
+
+```sh
+bash scripts/install.sh --icons
+```
+
+To uninstall:
+
+```sh
+bash scripts/install.sh --uninstall
+```
+
+### Bind to a key
+
+Add this to your Hyprland config (`~/.config/hypr/hyprland.conf`):
+
+```
+bind = SUPER, Space, exec, trebuchet
+```
+
+## Setup from source
+
+### 1. Fetch bundled icons (optional)
 
 trebuchet ships a script that populates `assets/icons/` with high-resolution SVGs
 for ~80 common applications. It checks locally installed icon themes first
@@ -39,28 +75,10 @@ version control (see `.gitignore`).
 If you have Papirus installed (`pacman -S papirus-icon-theme` / `apt install papirus-icon-theme`),
 the script works entirely offline.
 
-### 2. Build
-
-```sh
-cargo build --release
-```
-
-## Run
+### 2. Build and run
 
 ```sh
 cargo run --release
-```
-
-Or after building, copy the binary to your PATH:
-
-```sh
-cp target/release/trebuchet /usr/bin/
-```
-
-Then bind it to a key in your Hyprland config:
-
-```
-bind = SUPER, Space, exec, trebuchet
 ```
 
 ## Usage
