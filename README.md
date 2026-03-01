@@ -1,6 +1,6 @@
 # trebuchet
 
-A application launcher for Hyprland/Wayland.
+An application launcher for Hyprland/Wayland.
 
 Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https://github.com/waycrate/exwlseat).
 
