@@ -6,7 +6,7 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 
 ## Features
 
-- Full-screen overlay using the Wayland layer-shell protocol
+- Screen overlay using the Wayland layer-shell protocol
 - Real-time fuzzy search across all installed applications
 - Icon display from the system icon theme
 - Escape to close
