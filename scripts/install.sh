@@ -56,9 +56,17 @@ DESKTOP_FILE="$DESKTOP_DIR/trebuchet.desktop"
 
 # ── Privilege helpers ─────────────────────────────────────────────────────────
 # Use sudo only when --system and we're not already root.
+# Prompt upfront so the password isn't requested mid-build.
 
 if $SYSTEM && [[ $EUID -ne 0 ]]; then
     PRIV="sudo"
+    echo "sudo access is required for system-wide install."
+    sudo -v
+    # Keep the sudo credential alive in the background for the duration of
+    # the build (which can take several minutes on a fresh checkout).
+    ( while true; do sudo -n true; sleep 50; done ) &
+    SUDO_KEEPALIVE_PID=$!
+    trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null' EXIT
 else
     PRIV=""
 fi
