@@ -64,7 +64,13 @@ pub fn scan_applications() -> Vec<AppEntry> {
         }
     }
 
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by(|a, b| {
+        match (a.icon.is_some(), b.icon.is_some()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
     entries
 }
 

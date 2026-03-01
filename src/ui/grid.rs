@@ -1,6 +1,6 @@
 use iced::{
     alignment,
-    widget::{button, column, container, image, row, scrollable, svg, text},
+    widget::{button, column, container, image, row, svg, text},
     Alignment, Element, Length,
 };
 
@@ -14,10 +14,9 @@ pub fn app_grid<'a>(
     config: &Config,
 ) -> Element<'a, Message> {
     let icon_size = config.icon_size as f32;
-    let columns = config.columns;
 
     let rows: Vec<Element<'a, Message>> = indices
-        .chunks(columns)
+        .chunks(config.columns)
         .map(|chunk| {
             let cells: Vec<Element<'a, Message>> = chunk
                 .iter()
@@ -67,12 +66,9 @@ pub fn app_grid<'a>(
         })
         .collect();
 
-    scrollable(
-        column(rows)
-            .spacing(16)
-            .padding(20)
-            .width(Length::Fill),
-    )
-    .height(Length::Fill)
-    .into()
+    column(rows)
+        .spacing(16)
+        .padding(20)
+        .width(Length::Fill)
+        .into()
 }
