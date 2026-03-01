@@ -7,8 +7,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            columns: 6,
-            rows: 4,
+            columns: 7,
+            rows: 5,
             icon_size: 96,
         }
     }

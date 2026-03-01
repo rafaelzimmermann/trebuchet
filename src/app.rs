@@ -1,9 +1,10 @@
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use iced::{
+    alignment,
     event,
     keyboard::{self, key::Named, Key},
     widget::{button, column, container, row, text},
-    Alignment, Element, Event, Length, Subscription, Task,
+    Color, Element, Event, Length, Subscription, Task,
 };
 use iced::event::Status;
 use iced_layershell::to_layer_message;
@@ -26,6 +27,7 @@ pub enum Message {
     SearchChanged(String),
     AppActivated(usize),
     KeyPressed(Key),
+    GoToPage(usize),
     PageNext,
     PagePrev,
 }
@@ -48,6 +50,8 @@ pub fn namespace() -> String {
 }
 
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
+    let page_size = state.config.columns * state.config.rows;
+
     match msg {
         Message::SearchChanged(query) => {
             state.query = query.clone();
@@ -77,9 +81,8 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         Message::KeyPressed(key) => match key {
             Key::Named(Named::Escape) => std::process::exit(0),
             Key::Named(Named::PageDown) => {
-                let page_size = state.config.columns * state.config.rows;
-                let total_pages = pages(state.filtered.len(), page_size);
-                if state.page + 1 < total_pages {
+                let total = pages(state.filtered.len(), page_size);
+                if state.page + 1 < total {
                     state.page += 1;
                 }
             }
@@ -90,10 +93,13 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             }
             _ => {}
         },
+        Message::GoToPage(p) => {
+            let total = pages(state.filtered.len(), page_size);
+            state.page = p.min(total.saturating_sub(1));
+        }
         Message::PageNext => {
-            let page_size = state.config.columns * state.config.rows;
-            let total_pages = pages(state.filtered.len(), page_size);
-            if state.page + 1 < total_pages {
+            let total = pages(state.filtered.len(), page_size);
+            if state.page + 1 < total {
                 state.page += 1;
             }
         }
@@ -114,38 +120,42 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     let end = (start + page_size).min(state.filtered.len());
     let page_slice = &state.filtered[start..end];
 
-    let nav = row![
-        button("←").on_press_maybe(
-            (state.page > 0).then_some(Message::PagePrev)
-        ),
-        text(format!("{} / {}", state.page + 1, total_pages.max(1))).size(14),
-        button("→").on_press_maybe(
-            (state.page + 1 < total_pages).then_some(Message::PageNext)
-        ),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
+    let dots: Vec<Element<'_, Message>> = (0..total_pages)
+        .map(|i| {
+            let color = if i == state.page {
+                Color::WHITE
+            } else {
+                Color { r: 1.0, g: 1.0, b: 1.0, a: 0.35 }
+            };
+            button(text("●").size(10).color(color))
+                .on_press(Message::GoToPage(i))
+                .padding([4, 5])
+                .style(|_theme, _status| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+                .into()
+        })
+        .collect();
 
-    let content = column![
+    let pagination = container(row(dots).spacing(2))
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Center);
+
+    column![
         search_bar(&state.query),
         app_grid(&state.apps, page_slice, &state.config),
-        container(nav).width(Length::Fill).align_x(iced::alignment::Horizontal::Center),
+        pagination,
     ]
     .spacing(16)
-    .padding(24);
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    .padding(24)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 fn pages(total: usize, page_size: usize) -> usize {
-    if page_size == 0 {
-        1
-    } else {
-        total.div_ceil(page_size)
-    }
+    if page_size == 0 { 1 } else { total.div_ceil(page_size) }
 }
 
 fn on_event(event: Event, _status: Status, _id: iced::window::Id) -> Option<Message> {

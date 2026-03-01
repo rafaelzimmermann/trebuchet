@@ -1,7 +1,7 @@
 use iced::{
     alignment,
     widget::{button, column, container, image, row, svg, text},
-    Alignment, Element, Length,
+    Alignment, Color, Element, Length,
 };
 
 use crate::app::Message;
@@ -41,7 +41,7 @@ pub fn app_grid<'a>(
                                     .into()
                             }
                         }
-                        None => container(text("?").size(32))
+                        None => container(text("?").size(32).color(Color::WHITE))
                             .width(icon_size)
                             .height(icon_size)
                             .align_x(alignment::Horizontal::Center)
@@ -49,26 +49,37 @@ pub fn app_grid<'a>(
                             .into(),
                     };
 
-                    let cell = column![icon, text(app.name.as_str()).size(12)]
+                    let label = text(app.name.as_str())
+                        .size(13)
+                        .color(Color::WHITE);
+
+                    let cell = column![icon, label]
                         .align_x(Alignment::Center)
-                        .spacing(4)
-                        .width(120);
+                        .spacing(6);
 
                     button(cell)
                         .on_press(Message::AppActivated(idx))
-                        .padding(8)
-                        .style(button::text)
+                        .padding(12)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .style(|_theme, _status| button::Style {
+                            text_color: Color::WHITE,
+                            background: None,
+                            ..Default::default()
+                        })
                         .into()
                 })
                 .collect();
 
-            row(cells).spacing(8).into()
+            row(cells)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         })
         .collect();
 
     column(rows)
-        .spacing(16)
-        .padding(20)
         .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
