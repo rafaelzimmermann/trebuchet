@@ -1,9 +1,24 @@
 use std::path::PathBuf;
 
+use iced::widget::{image, svg};
+use rust_embed::RustEmbed;
+
+/// Icons bundled into the binary at compile time from `assets/icons/`.
+#[derive(RustEmbed)]
+#[folder = "assets/icons/"]
+struct EmbeddedIcons;
+
+/// A resolved, ready-to-render icon handle.
+#[derive(Clone)]
+pub enum IconHandle {
+    Vector(svg::Handle),
+    Raster(image::Handle),
+}
+
 pub struct AppEntry {
     pub name: String,
     pub exec: String,
-    pub icon: Option<PathBuf>,
+    pub icon: Option<IconHandle>,
 }
 
 pub fn scan_applications() -> Vec<AppEntry> {
@@ -74,43 +89,27 @@ pub fn scan_applications() -> Vec<AppEntry> {
     entries
 }
 
-fn resolve_icon(icon_name: &str) -> Option<PathBuf> {
-    // Absolute path in the .desktop file — use as-is.
+fn resolve_icon(icon_name: &str) -> Option<IconHandle> {
+    // 1. Embedded assets (compiled into the binary).
+    for ext in ["svg", "png"] {
+        let filename = format!("{icon_name}.{ext}");
+        if let Some(file) = EmbeddedIcons::get(&filename) {
+            let data: Vec<u8> = file.data.into_owned();
+            return Some(if ext == "svg" {
+                IconHandle::Vector(svg::Handle::from_memory(data))
+            } else {
+                IconHandle::Raster(image::Handle::from_bytes(data))
+            });
+        }
+    }
+
+    // 2. Absolute path in the .desktop file.
     let p = PathBuf::from(icon_name);
     if p.is_absolute() && p.exists() {
-        return Some(p);
+        return Some(path_handle(&p));
     }
 
-    // Bundled assets: checked before system paths so our high-res icons win.
-    //
-    // 1. Relative to CWD — works with `cargo run` from the project root.
-    // 2. Relative to the running binary — works for an installed copy that
-    //    keeps `assets/icons/` next to the executable.
-    // 3. ../share/trebuchet/icons/ — FHS layout
-    //    (binary in /usr/local/bin, data in /usr/local/share/trebuchet/icons).
-    let asset_roots: Vec<PathBuf> = {
-        let mut roots = vec![PathBuf::from(".")];
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                roots.push(dir.to_path_buf());
-                if let Some(parent) = dir.parent() {
-                    roots.push(parent.join("share/trebuchet"));
-                }
-            }
-        }
-        roots
-    };
-
-    for root in &asset_roots {
-        for ext in ["svg", "png"] {
-            let candidate = root.join("assets/icons").join(format!("{icon_name}.{ext}"));
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    // System icon theme paths — SVG preferred over PNG for quality.
+    // 3. System icon theme directories.
     let home = std::env::var("HOME").unwrap_or_default();
     let system_dirs = [
         format!("{home}/.local/share/icons/hicolor/scalable/apps"),
@@ -129,12 +128,20 @@ fn resolve_icon(icon_name: &str) -> Option<PathBuf> {
         for ext in ["svg", "png"] {
             let candidate = PathBuf::from(dir).join(format!("{icon_name}.{ext}"));
             if candidate.exists() {
-                return Some(candidate);
+                return Some(path_handle(&candidate));
             }
         }
     }
 
     None
+}
+
+fn path_handle(path: &PathBuf) -> IconHandle {
+    if path.extension().and_then(|e| e.to_str()) == Some("svg") {
+        IconHandle::Vector(svg::Handle::from_path(path))
+    } else {
+        IconHandle::Raster(image::Handle::from_path(path))
+    }
 }
 
 /// Strip desktop field codes and spawn the application.

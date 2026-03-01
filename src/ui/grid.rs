@@ -6,7 +6,7 @@ use iced::{
 
 use crate::app::Message;
 use crate::config::Config;
-use crate::launcher::AppEntry;
+use crate::launcher::{AppEntry, IconHandle};
 
 pub fn app_grid<'a>(
     apps: &'a [AppEntry],
@@ -24,23 +24,14 @@ pub fn app_grid<'a>(
                     let app = &apps[idx];
 
                     let icon: Element<'a, Message> = match &app.icon {
-                        Some(path) => {
-                            let ext = path
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or("");
-                            if ext == "svg" {
-                                svg(svg::Handle::from_path(path))
-                                    .width(icon_size)
-                                    .height(icon_size)
-                                    .into()
-                            } else {
-                                image(image::Handle::from_path(path))
-                                    .width(icon_size)
-                                    .height(icon_size)
-                                    .into()
-                            }
-                        }
+                        Some(IconHandle::Vector(handle)) => svg(handle.clone())
+                            .width(icon_size)
+                            .height(icon_size)
+                            .into(),
+                        Some(IconHandle::Raster(handle)) => image(handle.clone())
+                            .width(icon_size)
+                            .height(icon_size)
+                            .into(),
                         None => container(text("?").size(32).color(Color::WHITE))
                             .width(icon_size)
                             .height(icon_size)
