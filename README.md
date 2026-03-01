@@ -21,30 +21,31 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 
 ## Install
 
-Clone the repository and run the install script:
-
 ```sh
-git clone https://github.com/rafaelzimmermann/trebuchet.git
-cd trebuchet
-bash scripts/install.sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/rafaelzimmermann/trebuchet/main/scripts/install.sh)"
 ```
 
-This builds a release binary and installs it to `~/.local/bin`. To install system-wide to `/usr/local/bin` instead:
+This clones the repository, fetches high-resolution icons for ~80 common apps, builds a release binary, and installs it system-wide to `/usr/local/bin`.
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Install to `~/.local/bin` instead of `/usr/local/bin` |
+| `--no-icons` | Skip fetching high-resolution icons |
+| `--uninstall` | Remove installed files |
+
+Pass flags by cloning and running the script directly:
 
 ```sh
-bash scripts/install.sh --system
-```
-
-To also fetch high-resolution icons for ~80 common apps before installing:
-
-```sh
-bash scripts/install.sh --icons
+git clone --depth=1 https://github.com/rafaelzimmermann/trebuchet.git
+bash trebuchet/scripts/install.sh --user
 ```
 
 To uninstall:
 
 ```sh
-bash scripts/install.sh --uninstall
+bash trebuchet/scripts/install.sh --uninstall
 ```
 
 ### Bind to a key

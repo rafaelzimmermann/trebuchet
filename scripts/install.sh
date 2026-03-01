@@ -1,30 +1,37 @@
 #!/usr/bin/env bash
 # Install trebuchet — Wayland app launcher
 #
-# Usage:
-#   bash scripts/install.sh              # user install → ~/.local/bin
-#   bash scripts/install.sh --system     # system install → /usr/local/bin  (uses sudo for copies)
-#   bash scripts/install.sh --icons      # fetch icons before installing
-#   bash scripts/install.sh --uninstall  # remove installed files
+# One-line install (recommended):
+#   sh -c "$(curl -fsSL https://raw.githubusercontent.com/rafaelzimmermann/trebuchet/main/scripts/install.sh)"
 #
-# Must be run from the project root (where Cargo.toml lives).
-# cargo always runs as YOU — sudo is only used for the file copies with --system.
+# Installs system-wide to /usr/local/bin with high-resolution icons by default.
+#
+# Options:
+#   --user        install to ~/.local/bin instead of /usr/local/bin
+#   --no-icons    skip fetching high-resolution icons
+#   --uninstall   remove installed files
+#
+# When run from the project root (where Cargo.toml lives), the local source is used.
+# Otherwise the repository is cloned automatically.
 
 set -euo pipefail
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
-SYSTEM=false
-FETCH_ICONS=false
+SYSTEM=true
+FETCH_ICONS=true
 UNINSTALL=false
 
 for arg in "$@"; do
     case "$arg" in
+        --user)      SYSTEM=false ;;
+        --no-icons)  FETCH_ICONS=false ;;
+        --uninstall) UNINSTALL=true ;;
+        # Legacy flags (now the default — kept for compatibility)
         --system)    SYSTEM=true ;;
         --icons)     FETCH_ICONS=true ;;
-        --uninstall) UNINSTALL=true ;;
         --help|-h)
-            sed -n '2,10p' "$0" | sed 's/^# \?//'
+            sed -n '2,15p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
@@ -62,13 +69,6 @@ priv_cp() { $PRIV cp "$@"; }
 priv_tee() { $PRIV tee "$@" >/dev/null; }
 priv_rm() { $PRIV rm "$@"; }
 
-# ── Sanity check ──────────────────────────────────────────────────────────────
-
-if [[ ! -f Cargo.toml ]]; then
-    echo "Error: run this script from the project root (where Cargo.toml lives)." >&2
-    exit 1
-fi
-
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 
 if $UNINSTALL; then
@@ -80,9 +80,23 @@ if $UNINSTALL; then
     exit 0
 fi
 
+# ── Source (clone if not in project root) ─────────────────────────────────────
+
+if [[ ! -f Cargo.toml ]]; then
+    if ! command -v git &>/dev/null; then
+        echo "Error: git is required to install trebuchet." >&2
+        exit 1
+    fi
+    CLONE_DIR=$(mktemp -d)
+    trap 'rm -rf "$CLONE_DIR"' EXIT
+    echo "Cloning trebuchet…"
+    git clone --depth=1 https://github.com/rafaelzimmermann/trebuchet.git "$CLONE_DIR"
+    cd "$CLONE_DIR"
+fi
+
 # ── Icons ─────────────────────────────────────────────────────────────────────
 
-if $FETCH_ICONS || [[ ! -d assets/icons || -z "$(ls -A assets/icons 2>/dev/null)" ]]; then
+if $FETCH_ICONS; then
     echo "Fetching icons…"
     bash scripts/fetch-icons.sh
 fi
