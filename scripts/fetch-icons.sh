@@ -5,7 +5,9 @@
 #   1. Locally installed icon themes (Papirus, Breeze, Adwaita, hicolor …)
 #   2. jsDelivr CDN — serves any GitHub repo without needing the branch name
 #      https://cdn.jsdelivr.net/gh/PapirusDevelopmentTeam/papirus-icon-theme
-#   3. Bulk git clone of Papirus as a last resort (one clone, many icons)
+#   3. Simple Icons CDN — brand/product SVGs not found in Papirus
+#      https://cdn.jsdelivr.net/npm/simple-icons@latest/icons
+#   4. Bulk git clone of Papirus as a last resort (one clone, many icons)
 #
 # Usage:
 #   bash scripts/fetch-icons.sh              # writes to assets/icons/, 16 jobs
@@ -60,6 +62,21 @@ JSDELIVR="https://cdn.jsdelivr.net/gh/$PAPIRUS_GH"
 RAW="https://raw.githubusercontent.com/$PAPIRUS_GH"
 REMOTE_SIZES=(64x64 48x48 32x32)
 
+# Papirus uses symlinks extensively — e.g. com.obsproject.Studio.svg contains
+# just the text "obs.svg".  CDNs serve the symlink content as-is, so we must
+# detect and re-fetch the target, still saving under the originally requested name.
+papirus_symlink_target() {
+    local file="$1"
+    local content
+    content=$(cat "$file" 2>/dev/null) || return 1
+    # A symlink is a tiny file whose entire content is "something.svg"
+    if [[ ${#content} -lt 80 && "$content" =~ ^[a-zA-Z0-9._-]+\.svg$ ]]; then
+        echo "$content"
+        return 0
+    fi
+    return 1
+}
+
 remote_fetch_one() {
     local name="$1"
     local dest="$DEST/$name.svg"
@@ -68,18 +85,52 @@ remote_fetch_one() {
         # jsDelivr (no branch name required)
         if curl -sf --max-time 15 \
                 "$JSDELIVR/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
-            echo "  ↓  $name  ($size)"
-            return 0
+            # Follow Papirus symlink if needed
+            if target=$(papirus_symlink_target "$dest"); then
+                if curl -sf --max-time 15 \
+                        "$JSDELIVR/Papirus/$size/apps/$target" -o "$dest" 2>/dev/null; then
+                    echo "  ↓  $name → $target  ($size)"
+                    return 0
+                fi
+                rm -f "$dest"
+            else
+                echo "  ↓  $name  ($size)"
+                return 0
+            fi
         fi
         # raw.githubusercontent.com fallback (try both common branch names)
         for branch in master main; do
             if curl -sf --max-time 15 \
                     "$RAW/$branch/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
-                echo "  ↓  $name  ($size/$branch)"
-                return 0
+                if target=$(papirus_symlink_target "$dest"); then
+                    if curl -sf --max-time 15 \
+                            "$RAW/$branch/Papirus/$size/apps/$target" -o "$dest" 2>/dev/null; then
+                        echo "  ↓  $name → $target  ($size/$branch)"
+                        return 0
+                    fi
+                    rm -f "$dest"
+                else
+                    echo "  ↓  $name  ($size/$branch)"
+                    return 0
+                fi
             fi
         done
     done
+    return 1
+}
+
+# ── Remote: Simple Icons CDN (brand icons not in Papirus) ────────────────────
+
+SIMPLE_ICONS_CDN="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons"
+
+remote_fetch_simple_icons() {
+    local name="$1"
+    local dest="$DEST/$name.svg"
+    if curl -sf --max-time 15 \
+            "$SIMPLE_ICONS_CDN/$name.svg" -o "$dest" 2>/dev/null; then
+        echo "  ↓  $name  (simple-icons)"
+        return 0
+    fi
     return 1
 }
 
@@ -120,6 +171,12 @@ remote_fetch_from_clone() {
     for size in "${REMOTE_SIZES[@]}"; do
         local src="$CLONE_DIR/Papirus/$size/apps/$name.svg"
         if [[ -f "$src" ]]; then
+            # Follow Papirus symlink if needed
+            if target=$(papirus_symlink_target "$src"); then
+                local target_src="$CLONE_DIR/Papirus/$size/apps/$target"
+                [[ -f "$target_src" ]] || continue
+                src="$target_src"
+            fi
             cp "$src" "$DEST/$name.svg"
             echo "  ↓  $name  ($size, from clone)"
             return 0
@@ -151,6 +208,11 @@ fetch() {
         return 0
     fi
 
+    if remote_fetch_simple_icons "$name"; then
+        touch "$TMP/ok_${name}"
+        return 0
+    fi
+
     # Mark for bulk-clone pass.
     touch "$TMP/need_clone_${name}"
 }
@@ -176,10 +238,15 @@ ICONS=(
     # Communication
     discord slack signal-desktop telegram-desktop thunderbird
     zoom teams element-desktop hexchat skypeforlinux
+    whatsapp 
+    
+    # AI / LLM services
+    anthropic claude openai googlegemini mistralai
+    perplexity xai cohere huggingface ollama
 
     # Media
     spotify vlc mpv celluloid rhythmbox clementine lollypop
-    audacious totem obs-studio com.obsproject.Studio
+    audacious totem com.obsproject.Studio
     handbrake shotwell darktable rawtherapee
 
     # Productivity

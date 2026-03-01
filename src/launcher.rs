@@ -73,7 +73,16 @@ pub fn scan_applications() -> Vec<AppEntry> {
                 None => continue,
             };
 
-            let icon = desktop.icon().and_then(resolve_icon);
+            // Prefer an embedded SVG (fetched by fetch-icons.sh) over whatever
+            // the system resolves — Chrome/Brave web-app .desktop files use
+            // opaque icon names (chrome-<hash>-Default) that point to low-res
+            // PNGs.  If the system lookup didn't yield a vector, try the
+            // embedded icons by normalising the app's display name.
+            let system_icon = desktop.icon().and_then(resolve_icon);
+            let icon = match &system_icon {
+                Some(IconHandle::Vector(_)) => system_icon,
+                _ => try_embedded_by_name(&name).or(system_icon),
+            };
 
             entries.push(AppEntry { name, exec, icon });
         }
@@ -87,6 +96,47 @@ pub fn scan_applications() -> Vec<AppEntry> {
         }
     });
     entries
+}
+
+/// Return candidate icon filenames (without extension) derived from an app's
+/// display name, in preference order.  Duplicates are suppressed.
+///
+/// Examples:
+///   "WhatsApp Web" → ["whatsapp-web", "whatsappweb", "whatsapp"]
+///   "Google Gemini" → ["google-gemini", "googlegemini"]
+///   "Claude"        → ["claude"]
+pub(crate) fn name_candidates(name: &str) -> Vec<String> {
+    let base = name.to_lowercase();
+    let stripped = base.replace(" web", "");
+    let stripped = stripped.trim();
+    let mut seen = std::collections::HashSet::new();
+    let raw = [
+        base.replace(' ', "-"),
+        base.replace(' ', ""),
+        stripped.replace(' ', "-"),
+        stripped.replace(' ', ""),
+    ];
+    raw.into_iter()
+        .filter(|s| !s.is_empty() && seen.insert(s.clone()))
+        .collect()
+}
+
+/// Try to find an embedded icon by normalising the app's display name.
+fn try_embedded_by_name(name: &str) -> Option<IconHandle> {
+    for candidate in name_candidates(name) {
+        for ext in ["svg", "png"] {
+            let filename = format!("{candidate}.{ext}");
+            if let Some(file) = EmbeddedIcons::get(&filename) {
+                let data: Vec<u8> = file.data.into_owned();
+                return Some(if ext == "svg" {
+                    IconHandle::Vector(svg::Handle::from_memory(data))
+                } else {
+                    IconHandle::Raster(image::Handle::from_bytes(data))
+                });
+            }
+        }
+    }
+    None
 }
 
 fn resolve_icon(icon_name: &str) -> Option<IconHandle> {
@@ -170,7 +220,48 @@ pub fn launch_app(exec: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::clean_exec;
+    use super::{clean_exec, name_candidates};
+
+    // ── name_candidates ───────────────────────────────────────────────────────
+
+    #[test]
+    fn simple_name_lowercased() {
+        assert_eq!(name_candidates("Claude"), vec!["claude"]);
+    }
+
+    #[test]
+    fn two_word_name_produces_dash_and_joined() {
+        assert_eq!(
+            name_candidates("Google Gemini"),
+            vec!["google-gemini", "googlegemini"]
+        );
+    }
+
+    #[test]
+    fn web_suffix_stripped() {
+        // "WhatsApp Web" → whatsapp-web, whatsappweb, whatsapp (no dup)
+        let c = name_candidates("WhatsApp Web");
+        assert_eq!(c, vec!["whatsapp-web", "whatsappweb", "whatsapp"]);
+    }
+
+    #[test]
+    fn web_suffix_only_entry_doesnt_produce_empty() {
+        // "Web" alone strips to "" which should be filtered out
+        let c = name_candidates("Web");
+        assert!(!c.contains(&String::new()));
+    }
+
+    #[test]
+    fn no_duplicates_when_stripped_matches_original() {
+        // "OpenAI" has no spaces so dash/joined variants are the same
+        let c = name_candidates("OpenAI");
+        assert_eq!(c, vec!["openai"]);
+    }
+
+    #[test]
+    fn single_word_no_web() {
+        assert_eq!(name_candidates("Spotify"), vec!["spotify"]);
+    }
 
     #[test]
     fn strips_common_field_codes() {

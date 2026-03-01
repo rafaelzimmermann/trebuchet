@@ -15,7 +15,7 @@ pub fn app_grid<'a>(
 ) -> Element<'a, Message> {
     let icon_size = config.icon_size as f32;
 
-    let rows: Vec<Element<'a, Message>> = indices
+    let mut rows: Vec<Element<'a, Message>> = indices
         .chunks(config.columns)
         .map(|chunk| {
             let mut cells: Vec<Element<'a, Message>> = chunk
@@ -73,6 +73,14 @@ pub fn app_grid<'a>(
                 .into()
         })
         .collect();
+
+    // Pad missing rows so the grid height stays constant while searching.
+    while rows.len() < config.rows {
+        let cells: Vec<Element<'a, Message>> = (0..config.columns)
+            .map(|_| Space::new().width(Length::Fill).height(Length::Fill).into())
+            .collect();
+        rows.push(row(cells).width(Length::Fill).height(Length::Fill).into());
+    }
 
     column(rows)
         .width(Length::Fill)
