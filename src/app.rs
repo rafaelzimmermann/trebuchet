@@ -148,7 +148,7 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         pagination,
     ]
     .spacing(16)
-    .padding(24)
+    .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
     .width(Length::Fill)
     .height(Length::Fill)
     .into()

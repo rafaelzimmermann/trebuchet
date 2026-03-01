@@ -1,6 +1,6 @@
 use iced::{
     alignment,
-    widget::{button, column, container, image, row, svg, text},
+    widget::{button, column, container, image, row, svg, text, Space},
     Alignment, Color, Element, Length,
 };
 
@@ -18,7 +18,7 @@ pub fn app_grid<'a>(
     let rows: Vec<Element<'a, Message>> = indices
         .chunks(config.columns)
         .map(|chunk| {
-            let cells: Vec<Element<'a, Message>> = chunk
+            let mut cells: Vec<Element<'a, Message>> = chunk
                 .iter()
                 .map(|&idx| {
                     let app = &apps[idx];
@@ -70,6 +70,11 @@ pub fn app_grid<'a>(
                         .into()
                 })
                 .collect();
+
+            // Pad short rows so every column lines up with the rows above.
+            while cells.len() < config.columns {
+                cells.push(Space::new().width(Length::Fill).height(Length::Fill).into());
+            }
 
             row(cells)
                 .width(Length::Fill)
