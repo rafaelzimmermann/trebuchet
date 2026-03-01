@@ -1,0 +1,12 @@
+[package]
+name = "trebuchet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced = { version = "0.14", features = ["image", "svg"] }
+iced_layershell = "0.15"
+freedesktop-desktop-entry = "0.8"
+xdg = "3.0"
+fuzzy-matcher = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
