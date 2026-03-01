@@ -13,7 +13,7 @@ fn main() -> iced_layershell::Result {
     let layer_settings = LayerShellSettings {
         anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
         layer: Layer::Overlay,
-        exclusive_zone: -1,
+        exclusive_zone: 0,
         size: None,
         margin: (0, 0, 0, 0),
         keyboard_interactivity: KeyboardInteractivity::Exclusive,
