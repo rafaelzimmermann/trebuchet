@@ -174,7 +174,7 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         .into()
 }
 
-fn pages(total: usize, page_size: usize) -> usize {
+pub(crate) fn pages(total: usize, page_size: usize) -> usize {
     if page_size == 0 { 1 } else { total.div_ceil(page_size) }
 }
 
@@ -198,4 +198,136 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
 
 pub fn subscription(_state: &Trebuchet) -> Subscription<Message> {
     event::listen_with(on_event)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::launcher::AppEntry;
+
+    fn make_state(names: &[&str]) -> Trebuchet {
+        let apps = names
+            .iter()
+            .map(|n| AppEntry { name: n.to_string(), exec: n.to_string(), icon: None })
+            .collect::<Vec<_>>();
+        let filtered = (0..apps.len()).collect();
+        Trebuchet {
+            apps,
+            filtered,
+            query: String::new(),
+            config: Config { columns: 3, rows: 2, icon_size: 64 },
+            page: 0,
+        }
+    }
+
+    // ── pages() ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pages_zero_items() {
+        assert_eq!(pages(0, 35), 0);
+    }
+
+    #[test]
+    fn pages_exact_fit() {
+        assert_eq!(pages(35, 35), 1);
+    }
+
+    #[test]
+    fn pages_one_over() {
+        assert_eq!(pages(36, 35), 2);
+    }
+
+    #[test]
+    fn pages_zero_page_size_returns_one() {
+        assert_eq!(pages(100, 0), 1);
+    }
+
+    #[test]
+    fn pages_single_item() {
+        assert_eq!(pages(1, 35), 1);
+    }
+
+    // ── search filter ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn empty_query_shows_all() {
+        let mut state = make_state(&["Firefox", "Code", "Terminal"]);
+        let _ = update(&mut state, Message::SearchChanged(String::new()));
+        assert_eq!(state.filtered, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn query_filters_by_name() {
+        let mut state = make_state(&["Firefox", "Files", "Terminal"]);
+        let _ = update(&mut state, Message::SearchChanged("fire".into()));
+        assert!(state.filtered.contains(&0), "Firefox should match 'fire'");
+        assert!(!state.filtered.contains(&2), "Terminal should not match 'fire'");
+    }
+
+    #[test]
+    fn no_match_yields_empty() {
+        let mut state = make_state(&["Firefox", "Code", "Terminal"]);
+        let _ = update(&mut state, Message::SearchChanged("zzzzzz".into()));
+        assert!(state.filtered.is_empty());
+    }
+
+    #[test]
+    fn search_resets_page_to_zero() {
+        let mut state = make_state(&["A", "B", "C", "D", "E", "F", "G"]);
+        state.page = 1;
+        let _ = update(&mut state, Message::SearchChanged("A".into()));
+        assert_eq!(state.page, 0);
+    }
+
+    #[test]
+    fn clearing_search_restores_all() {
+        let mut state = make_state(&["Firefox", "Code", "Terminal"]);
+        let _ = update(&mut state, Message::SearchChanged("fire".into()));
+        assert_eq!(state.filtered.len(), 1);
+        let _ = update(&mut state, Message::SearchChanged(String::new()));
+        assert_eq!(state.filtered.len(), 3);
+    }
+
+    // ── pagination ────────────────────────────────────────────────────────────
+    // Config has columns=3, rows=2 → page_size=6.
+
+    #[test]
+    fn page_next_advances() {
+        // 7 items, page_size=6 → 2 pages
+        let mut state = make_state(&["A", "B", "C", "D", "E", "F", "G"]);
+        let _ = update(&mut state, Message::PageNext);
+        assert_eq!(state.page, 1);
+    }
+
+    #[test]
+    fn page_next_clamps_at_last() {
+        let mut state = make_state(&["A", "B", "C", "D", "E", "F", "G"]);
+        state.page = 1;
+        let _ = update(&mut state, Message::PageNext); // already on last page
+        assert_eq!(state.page, 1);
+    }
+
+    #[test]
+    fn page_prev_decrements() {
+        let mut state = make_state(&["A", "B", "C", "D", "E", "F", "G"]);
+        state.page = 1;
+        let _ = update(&mut state, Message::PagePrev);
+        assert_eq!(state.page, 0);
+    }
+
+    #[test]
+    fn page_prev_clamps_at_zero() {
+        let mut state = make_state(&["A", "B", "C"]);
+        let _ = update(&mut state, Message::PagePrev);
+        assert_eq!(state.page, 0);
+    }
+
+    #[test]
+    fn go_to_page_clamps_to_last() {
+        // 6 items, page_size=6 → 1 page (index 0 only)
+        let mut state = make_state(&["A", "B", "C", "D", "E", "F"]);
+        let _ = update(&mut state, Message::GoToPage(99));
+        assert_eq!(state.page, 0);
+    }
 }

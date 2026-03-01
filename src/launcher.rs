@@ -144,10 +144,9 @@ fn path_handle(path: &PathBuf) -> IconHandle {
     }
 }
 
-/// Strip desktop field codes and spawn the application.
-pub fn launch_app(exec: &str) {
-    let clean: String = exec
-        .split_whitespace()
+/// Strip desktop entry field codes (§ 4 of the spec) from an Exec value.
+pub(crate) fn clean_exec(exec: &str) -> String {
+    exec.split_whitespace()
         .filter(|t| {
             !matches!(
                 *t,
@@ -156,11 +155,57 @@ pub fn launch_app(exec: &str) {
             )
         })
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" ")
+}
 
+/// Strip desktop field codes and spawn the application.
+pub fn launch_app(exec: &str) {
+    let clean = clean_exec(exec);
     let mut parts = clean.split_whitespace();
     if let Some(cmd) = parts.next() {
         let args: Vec<&str> = parts.collect();
         let _ = std::process::Command::new(cmd).args(args).spawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_exec;
+
+    #[test]
+    fn strips_common_field_codes() {
+        assert_eq!(clean_exec("firefox %U"), "firefox");
+        assert_eq!(clean_exec("code %F"), "code");
+        assert_eq!(clean_exec("gimp %f"), "gimp");
+        assert_eq!(clean_exec("xdg-open %u"), "xdg-open");
+    }
+
+    #[test]
+    fn strips_all_field_codes() {
+        let all = "app %f %F %u %U %d %D %n %N %i %c %k %v %m";
+        assert_eq!(clean_exec(all), "app");
+    }
+
+    #[test]
+    fn preserves_real_args() {
+        assert_eq!(
+            clean_exec("env FOO=bar myapp --flag %U"),
+            "env FOO=bar myapp --flag"
+        );
+    }
+
+    #[test]
+    fn no_field_codes_unchanged() {
+        assert_eq!(clean_exec("alacritty --title Launcher"), "alacritty --title Launcher");
+    }
+
+    #[test]
+    fn empty_string() {
+        assert_eq!(clean_exec(""), "");
+    }
+
+    #[test]
+    fn only_field_codes_yields_empty() {
+        assert_eq!(clean_exec("%f %F %u %U"), "");
     }
 }
