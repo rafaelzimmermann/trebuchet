@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
 # Populate assets/icons/ with high-resolution SVG icons for common apps.
 #
-# Strategy (in priority order):
-#   1. Local icon themes already installed on this machine
-#      (Papirus, Breeze, Adwaita, hicolor — searched from largest to smallest)
-#   2. Download from Papirus icon theme on GitHub (requires internet)
-#      https://github.com/PapirusIconTheme/papirus-icon-theme  GPL-3.0
+# Sources (tried in order for each icon):
+#   1. Locally installed icon themes (Papirus, Breeze, Adwaita, hicolor …)
+#   2. jsDelivr CDN — serves any GitHub repo without needing the branch name
+#      https://cdn.jsdelivr.net/gh/PapirusDevelopmentTeam/papirus-icon-theme
+#   3. Bulk git clone of Papirus as a last resort (one clone, many icons)
 #
 # Usage:
-#   bash scripts/fetch-icons.sh            # writes to assets/icons/
-#   bash scripts/fetch-icons.sh /some/dir  # custom output directory
+#   bash scripts/fetch-icons.sh              # writes to assets/icons/, 16 jobs
+#   bash scripts/fetch-icons.sh /other/dir   # custom output directory
+#   JOBS=4 bash scripts/fetch-icons.sh       # fewer parallel jobs (slow link)
 
 set -euo pipefail
 
 DEST="${1:-assets/icons}"
+JOBS="${JOBS:-16}"
 mkdir -p "$DEST"
 
-ok=0; skip=0; fail=0
+# Temp dir for race-free counters across background subshells.
+# CLONE_DIR is also cleaned up here if the script exits abnormally.
+TMP=$(mktemp -d)
+CLONE_DIR=""
+trap 'rm -rf "$TMP" "${CLONE_DIR:-}"' EXIT
 
-# ── Icon resolution helpers ───────────────────────────────────────────────────
+# ── Local lookup ──────────────────────────────────────────────────────────────
 
-# Ordered list of local theme search roots (prefer larger sizes).
 LOCAL_ROOTS=()
 for theme in Papirus breeze hicolor Adwaita AdwaitaLegacy locolor; do
     for base in /usr/share/icons /usr/local/share/icons "$HOME/.local/share/icons"; do
@@ -28,12 +33,11 @@ for theme in Papirus breeze hicolor Adwaita AdwaitaLegacy locolor; do
     done
 done
 
-# Preferred size folders, largest first.
-SIZE_DIRS=(scalable 96x96 64x64 48x48 symbolic 32x32)
+SIZE_DIRS=(scalable 96x96 64x64 48x48 32x32)
 
 local_lookup() {
     local name="$1"
-    for root in "${LOCAL_ROOTS[@]}"; do
+    for root in "${LOCAL_ROOTS[@]+"${LOCAL_ROOTS[@]}"}"; do
         for sz in "${SIZE_DIRS[@]}"; do
             for subdir in apps categories; do
                 for ext in svg png; do
@@ -46,17 +50,32 @@ local_lookup() {
     return 1
 }
 
-PAPIRUS_BRANCHES=(master main)
-PAPIRUS_BASE="https://raw.githubusercontent.com/PapirusIconTheme/papirus-icon-theme"
+# ── Remote: per-file download via jsDelivr ───────────────────────────────────
+#
+# jsDelivr resolves the default branch automatically — no branch name needed.
+# Fallback to raw.githubusercontent.com with both common branch names.
 
-remote_fetch() {
+PAPIRUS_GH="PapirusDevelopmentTeam/papirus-icon-theme"
+JSDELIVR="https://cdn.jsdelivr.net/gh/$PAPIRUS_GH"
+RAW="https://raw.githubusercontent.com/$PAPIRUS_GH"
+REMOTE_SIZES=(64x64 48x48 32x32)
+
+remote_fetch_one() {
     local name="$1"
     local dest="$DEST/$name.svg"
-    for branch in "${PAPIRUS_BRANCHES[@]}"; do
-        for size in 64x64 48x48 32x32; do
-            local url="$PAPIRUS_BASE/$branch/Papirus/$size/apps/$name.svg"
-            if curl -sf --max-time 10 "$url" -o "$dest" 2>/dev/null; then
-                echo "  ↓  $name  (remote $size/$branch)"
+
+    for size in "${REMOTE_SIZES[@]}"; do
+        # jsDelivr (no branch name required)
+        if curl -sf --max-time 15 \
+                "$JSDELIVR/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
+            echo "  ↓  $name  ($size)"
+            return 0
+        fi
+        # raw.githubusercontent.com fallback (try both common branch names)
+        for branch in master main; do
+            if curl -sf --max-time 15 \
+                    "$RAW/$branch/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
+                echo "  ↓  $name  ($size/$branch)"
                 return 0
             fi
         done
@@ -64,175 +83,168 @@ remote_fetch() {
     return 1
 }
 
+# ── Remote: bulk git clone (used when per-file downloads all fail) ────────────
+#
+# One shallow clone fetches only blobs that are actually needed (sparse checkout),
+# then all unresolved icons are copied from the local clone in one pass.
+
+bulk_clone_papirus() {
+    [[ -n "$CLONE_DIR" ]] && return 0   # already cloned
+
+    CLONE_DIR=$(mktemp -d)
+    echo ""
+    echo "  Bulk clone: fetching Papirus icon theme (sparse, depth 1)…"
+
+    if ! git clone --quiet --depth 1 --filter=blob:none --no-checkout \
+            "https://github.com/$PAPIRUS_GH.git" \
+            "$CLONE_DIR" 2>/dev/null; then
+        echo "  ✗  git clone failed — no remote icons available"
+        CLONE_DIR=""
+        return 1
+    fi
+
+    cd "$CLONE_DIR" || { CLONE_DIR=""; return 1; }
+    git sparse-checkout init --cone --quiet 2>/dev/null || true
+    local sparse_dirs=()
+    for size in "${REMOTE_SIZES[@]}"; do sparse_dirs+=("Papirus/$size/apps"); done
+    git sparse-checkout set "${sparse_dirs[@]}" --quiet 2>/dev/null || \
+        git sparse-checkout set "Papirus" --quiet 2>/dev/null || true
+    git checkout --quiet
+    cd - >/dev/null
+    echo "  Bulk clone ready."
+}
+
+remote_fetch_from_clone() {
+    local name="$1"
+    [[ -z "$CLONE_DIR" ]] && return 1
+    for size in "${REMOTE_SIZES[@]}"; do
+        local src="$CLONE_DIR/Papirus/$size/apps/$name.svg"
+        if [[ -f "$src" ]]; then
+            cp "$src" "$DEST/$name.svg"
+            echo "  ↓  $name  ($size, from clone)"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ── Per-icon fetch orchestration ──────────────────────────────────────────────
+
 fetch() {
     local name="$1"
-    local dest_svg="$DEST/$name.svg"
-    local dest_png="$DEST/$name.png"
 
-    # Already have it.
-    if [[ -f "$dest_svg" || -f "$dest_png" ]]; then
-        (( skip++ )) || true
+    if [[ -f "$DEST/$name.svg" || -f "$DEST/$name.png" ]]; then
+        touch "$TMP/skip_${name}"
         return 0
     fi
 
-    # Try local theme first.
     local src
     if src=$(local_lookup "$name" 2>/dev/null); then
-        local ext="${src##*.}"
-        cp "$src" "$DEST/$name.$ext"
-        echo "  ✓  $name  (local: ${src#$HOME})"
-        (( ok++ )) || true
+        cp "$src" "$DEST/$name.${src##*.}"
+        echo "  ✓  $name"
+        touch "$TMP/ok_${name}"
         return 0
     fi
 
-    # Fall back to remote download.
-    if remote_fetch "$name"; then
-        (( ok++ )) || true
+    if remote_fetch_one "$name"; then
+        touch "$TMP/ok_${name}"
         return 0
     fi
 
-    echo "  ✗  $name"
-    (( fail++ )) || true
-    return 0  # non-fatal
+    # Mark for bulk-clone pass.
+    touch "$TMP/need_clone_${name}"
 }
 
 # ── App list ──────────────────────────────────────────────────────────────────
 
-echo "── Browsers ──────────────────────────"
-fetch firefox
-fetch chromium
-fetch google-chrome
-fetch brave-browser
-fetch microsoft-edge
-fetch opera
-fetch vivaldi
-fetch epiphany
-fetch librewolf
+ICONS=(
+    # Browsers
+    firefox chromium google-chrome brave-browser microsoft-edge
+    opera vivaldi epiphany librewolf
 
-echo "── Terminals ─────────────────────────"
-fetch org.gnome.Terminal
-fetch kitty
-fetch alacritty
-fetch konsole
-fetch tilix
-fetch wezterm
-fetch foot
-fetch ghostty
-fetch xterm
+    # Terminals
+    org.gnome.Terminal kitty alacritty konsole tilix
+    wezterm foot com.mitchellh.ghostty xterm
 
-echo "── File managers ─────────────────────"
-fetch org.gnome.Nautilus
-fetch thunar
-fetch dolphin
-fetch nemo
-fetch pcmanfm
+    # File managers
+    org.gnome.Nautilus thunar dolphin nemo pcmanfm
 
-echo "── Editors & IDEs ────────────────────"
-fetch code
-fetch code-oss
-fetch vscodium
-fetch sublime-text
-fetch emacs
-fetch nvim
-fetch gedit
-fetch org.gnome.TextEditor
-fetch org.kde.kate
-fetch helix
+    # Editors & IDEs
+    code code-oss vscodium sublime-text emacs
+    nvim gedit org.gnome.TextEditor org.kde.kate helix
 
-echo "── Communication ─────────────────────"
-fetch discord
-fetch slack
-fetch signal-desktop
-fetch telegram-desktop
-fetch thunderbird
-fetch zoom
-fetch teams
-fetch element-desktop
-fetch hexchat
-fetch skypeforlinux
+    # Communication
+    discord slack signal-desktop telegram-desktop thunderbird
+    zoom teams element-desktop hexchat skypeforlinux
 
-echo "── Media ─────────────────────────────"
-fetch spotify
-fetch vlc
-fetch mpv
-fetch celluloid
-fetch rhythmbox
-fetch clementine
-fetch lollypop
-fetch audacious
-fetch totem
-fetch obs-studio
-fetch com.obsproject.Studio
-fetch handbrake
-fetch shotwell
-fetch darktable
-fetch rawtherapee
+    # Media
+    spotify vlc mpv celluloid rhythmbox clementine lollypop
+    audacious totem obs-studio com.obsproject.Studio
+    handbrake shotwell darktable rawtherapee
 
-echo "── Productivity ──────────────────────"
-fetch libreoffice-writer
-fetch libreoffice-calc
-fetch libreoffice-impress
-fetch libreoffice-draw
-fetch libreoffice-base
-fetch obsidian
-fetch typora
-fetch ghostwriter
-fetch marktext
+    # Productivity
+    libreoffice-writer libreoffice-calc libreoffice-impress
+    libreoffice-draw libreoffice-base obsidian typora ghostwriter marktext
 
-echo "── Design & Graphics ─────────────────"
-fetch gimp
-fetch inkscape
-fetch krita
-fetch blender
-fetch scribus
-fetch digikam
-fetch shotcut
-fetch kdenlive
+    # Design & Graphics
+    gimp inkscape krita blender scribus digikam shotcut kdenlive
 
-echo "── Development ───────────────────────"
-fetch gitg
-fetch gitkraken
-fetch dbeaver
-fetch postman
-fetch insomnia
-fetch beekeeper-studio
-fetch virtualbox
-fetch gnome-boxes
+    # Development
+    gitg gitkraken dbeaver postman insomnia
+    beekeeper-studio virtualbox gnome-boxes
 
-echo "── Gaming ────────────────────────────"
-fetch steam
-fetch lutris
-fetch heroic
+    # Gaming
+    steam lutris heroic
 
-echo "── System utilities ──────────────────"
-fetch org.gnome.Settings
-fetch gnome-control-center
-fetch org.gnome.Calculator
-fetch org.gnome.SystemMonitor
-fetch org.gnome.DiskUtility
-fetch org.gnome.baobab
-fetch gparted
-fetch keepassxc
-fetch bitwarden
-fetch org.gnome.Seahorse
-fetch gnome-tweaks
-fetch org.gnome.Extensions
-fetch synaptic
-fetch pamac-manager
+    # System utilities
+    org.gnome.Settings gnome-control-center org.gnome.Calculator
+    org.gnome.SystemMonitor org.gnome.DiskUtility org.gnome.baobab
+    gparted keepassxc bitwarden org.gnome.Seahorse gnome-tweaks
+    org.gnome.Extensions synaptic pamac-manager
 
-echo "── Misc ──────────────────────────────"
-fetch evince
-fetch org.gnome.Evince
-fetch okular
-fetch org.gnome.clocks
-fetch org.gnome.Maps
-fetch org.gnome.Calendar
-fetch org.gnome.Contacts
-fetch transmission-gtk
-fetch qbittorrent
-fetch filezilla
-fetch remmina
+    # Misc
+    evince org.gnome.Evince okular org.gnome.clocks org.gnome.Maps
+    org.gnome.Calendar org.gnome.Contacts transmission-gtk
+    qbittorrent filezilla remmina
+)
+
+# ── Pass 1: parallel per-file fetches ─────────────────────────────────────────
+
+total=${#ICONS[@]}
+echo "Fetching $total icons (up to $JOBS in parallel) …"
+echo ""
+
+for name in "${ICONS[@]}"; do
+    fetch "$name" &
+    while (( $(jobs -r | wc -l) >= JOBS )); do
+        wait -n 2>/dev/null || sleep 0.05
+    done
+done
+wait
+
+# ── Pass 2: bulk git clone for anything still missing ─────────────────────────
+
+need_clone=( "$TMP"/need_clone_* )
+if [[ -e "${need_clone[0]}" ]]; then
+    bulk_clone_papirus || true   # CLONE_DIR="" on failure; handled below
+    for marker in "${need_clone[@]}"; do
+        name="${marker##*/need_clone_}"
+        if remote_fetch_from_clone "$name"; then
+            rm "$marker"
+            touch "$TMP/ok_${name}"
+        else
+            echo "  ✗  $name"
+            touch "$TMP/fail_${name}"
+        fi
+    done
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+ok=$(find   "$TMP" -name "ok_*"   | wc -l)
+skip=$(find "$TMP" -name "skip_*" | wc -l)
+fail=$(find "$TMP" -name "fail_*" | wc -l)
 
 echo ""
 echo "Done.  ✓ $ok fetched   = $skip already existed   ✗ $fail not found"
-echo "Output: $DEST  ($(find "$DEST" -name '*.svg' -o -name '*.png' | wc -l) icons)"
+echo "Total: $(find "$DEST" \( -name '*.svg' -o -name '*.png' \) | wc -l) icons in $DEST"
