@@ -3,6 +3,7 @@ use iced::{
     alignment,
     event,
     keyboard::{self, key::Named, Key},
+    mouse,
     widget::{button, column, container, row, text},
     Color, Element, Event, Length, Subscription, Task,
 };
@@ -30,6 +31,7 @@ pub enum Message {
     GoToPage(usize),
     PageNext,
     PagePrev,
+    Close,
 }
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
@@ -108,6 +110,7 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 state.page -= 1;
             }
         }
+        Message::Close => std::process::exit(0),
         _ => {}
     }
     Task::none()
@@ -158,7 +161,7 @@ fn pages(total: usize, page_size: usize) -> usize {
     if page_size == 0 { 1 } else { total.div_ceil(page_size) }
 }
 
-fn on_event(event: Event, _status: Status, _id: iced::window::Id) -> Option<Message> {
+fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match event {
         Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => match &key {
             Key::Named(Named::Escape)
@@ -166,6 +169,12 @@ fn on_event(event: Event, _status: Status, _id: iced::window::Id) -> Option<Mess
             | Key::Named(Named::PageUp) => Some(Message::KeyPressed(key)),
             _ => None,
         },
+        // Cursor left our surface → user moved to another monitor.
+        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Close),
+        // Click that landed on background (not consumed by any widget).
+        Event::Mouse(mouse::Event::ButtonPressed(_)) if status == Status::Ignored => {
+            Some(Message::Close)
+        }
         _ => None,
     }
 }
