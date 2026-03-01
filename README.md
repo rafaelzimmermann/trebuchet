@@ -1,9 +1,12 @@
 # trebuchet
 
+<p align="center">
+  <img src="assets/logo.png" alt="trebuchet logo" width="128"/>
+</p>
+
 A application launcher for Hyprland/Wayland.
 
 <img width="1009" height="867" alt="image" src="https://github.com/user-attachments/assets/c7145631-065e-4522-856d-e6763bb0f8f0" />
-
 
 Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https://github.com/waycrate/exwlseat).
 
@@ -55,7 +58,7 @@ cargo run --release
 Or after building, copy the binary to your PATH:
 
 ```sh
-cp target/release/trebuchet ~/.local/bin/
+cp target/release/trebuchet /usr/bin/
 ```
 
 Then bind it to a key in your Hyprland config:
