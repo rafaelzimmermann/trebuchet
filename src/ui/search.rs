@@ -1,13 +1,16 @@
 use iced::{
     alignment,
-    widget::{container, row, text, text_input},
+    widget::{container, row, text, text_input, Id},
     Alignment, Background, Border, Color, Element, Length,
 };
 
 use crate::app::Message;
 
+pub const SEARCH_ID: &str = "trebuchet_search";
+
 pub fn search_bar(query: &str) -> Element<'_, Message> {
     let input = text_input("Search apps...", query)
+        .id(Id::new(SEARCH_ID))
         .on_input(Message::SearchChanged)
         .padding(0)
         .size(20)

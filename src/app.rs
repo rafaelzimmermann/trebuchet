@@ -26,6 +26,8 @@ pub struct Trebuchet {
 #[derive(Debug, Clone)]
 pub enum Message {
     SearchChanged(String),
+    SearchAppend(String),
+    SearchBackspace,
     AppActivated(usize),
     KeyPressed(Key),
     GoToPage(usize),
@@ -51,28 +53,40 @@ pub fn namespace() -> String {
     "trebuchet".into()
 }
 
+fn apply_filter(state: &mut Trebuchet) {
+    if state.query.is_empty() {
+        state.filtered = (0..state.apps.len()).collect();
+    } else {
+        let matcher = SkimMatcherV2::default();
+        let mut scored: Vec<(usize, i64)> = state
+            .apps
+            .iter()
+            .enumerate()
+            .filter_map(|(i, app)| matcher.fuzzy_match(&app.name, &state.query).map(|s| (i, s)))
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        state.filtered = scored.into_iter().map(|(i, _)| i).collect();
+    }
+}
+
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     let page_size = state.config.columns * state.config.rows;
 
     match msg {
         Message::SearchChanged(query) => {
-            state.query = query.clone();
+            state.query = query;
             state.page = 0;
-            if query.is_empty() {
-                state.filtered = (0..state.apps.len()).collect();
-            } else {
-                let matcher = SkimMatcherV2::default();
-                let mut scored: Vec<(usize, i64)> = state
-                    .apps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, app)| {
-                        matcher.fuzzy_match(&app.name, &query).map(|s| (i, s))
-                    })
-                    .collect();
-                scored.sort_by(|a, b| b.1.cmp(&a.1));
-                state.filtered = scored.into_iter().map(|(i, _)| i).collect();
-            }
+            apply_filter(state);
+        }
+        Message::SearchAppend(c) => {
+            state.query.push_str(&c);
+            state.page = 0;
+            apply_filter(state);
+        }
+        Message::SearchBackspace => {
+            state.query.pop();
+            state.page = 0;
+            apply_filter(state);
         }
         Message::AppActivated(idx) => {
             if let Some(app) = state.apps.get(idx) {
@@ -180,10 +194,23 @@ pub(crate) fn pages(total: usize, page_size: usize) -> usize {
 
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match event {
-        Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => match &key {
+        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => match &key {
             Key::Named(Named::Escape)
             | Key::Named(Named::PageDown)
             | Key::Named(Named::PageUp) => Some(Message::KeyPressed(key)),
+            // Route backspace and printable characters to the search query when
+            // no widget (e.g. a focused text_input) already consumed the event.
+            Key::Named(Named::Backspace) if status == Status::Ignored => {
+                Some(Message::SearchBackspace)
+            }
+            Key::Character(c)
+                if status == Status::Ignored
+                    && !modifiers.control()
+                    && !modifiers.alt()
+                    && !modifiers.logo() =>
+            {
+                Some(Message::SearchAppend(c.to_string()))
+            }
             _ => None,
         },
         // Cursor left our surface → user moved to another monitor.
