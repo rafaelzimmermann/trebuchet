@@ -20,6 +20,7 @@ pub struct Trebuchet {
     pub query: String,
     pub config: Config,
     pub page: usize,
+    pub selected: Option<usize>,
 }
 
 #[to_layer_message]
@@ -34,6 +35,11 @@ pub enum Message {
     PageNext,
     PagePrev,
     Close,
+    SelectNext,
+    SelectPrev,
+    SelectDown,
+    SelectUp,
+    ActivateSelected,
 }
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
@@ -45,6 +51,7 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         query: String::new(),
         config: Config::default(),
         page: 0,
+        selected: None,
     };
     (state, Task::none())
 }
@@ -67,6 +74,23 @@ fn apply_filter(state: &mut Trebuchet) {
         scored.sort_by(|a, b| b.1.cmp(&a.1));
         state.filtered = scored.into_iter().map(|(i, _)| i).collect();
     }
+    if !state.query.is_empty() && !state.filtered.is_empty() {
+        state.selected = Some(0);
+    } else {
+        state.selected = None;
+    }
+}
+
+fn move_selection(state: &mut Trebuchet, delta: isize) {
+    let page_size = state.config.columns * state.config.rows;
+    if state.filtered.is_empty() {
+        return;
+    }
+    let current = state.selected.unwrap_or(state.page * page_size);
+    let next = (current as isize + delta)
+        .clamp(0, state.filtered.len() as isize - 1) as usize;
+    state.selected = Some(next);
+    state.page = next / page_size;
 }
 
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
@@ -125,6 +149,20 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             }
         }
         Message::Close => std::process::exit(0),
+        Message::SelectNext => move_selection(state, 1),
+        Message::SelectPrev => move_selection(state, -1),
+        Message::SelectDown => move_selection(state, state.config.columns as isize),
+        Message::SelectUp => move_selection(state, -(state.config.columns as isize)),
+        Message::ActivateSelected => {
+            if let Some(sel) = state.selected {
+                if let Some(&app_idx) = state.filtered.get(sel) {
+                    if let Some(app) = state.apps.get(app_idx) {
+                        launch_app(&app.exec.clone());
+                        std::process::exit(0);
+                    }
+                }
+            }
+        }
         _ => {}
     }
     Task::none()
@@ -159,9 +197,13 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         .width(Length::Fill)
         .align_x(alignment::Horizontal::Center);
 
+    let highlighted = state.selected.and_then(|s| {
+        if s >= start && s < end { Some(s - start) } else { None }
+    });
+
     let content = column![
         search_bar(&state.query),
-        app_grid(&state.apps, page_slice, &state.config),
+        app_grid(&state.apps, page_slice, &state.config, highlighted),
         pagination,
     ]
     .spacing(16)
@@ -198,6 +240,19 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
             Key::Named(Named::Escape)
             | Key::Named(Named::PageDown)
             | Key::Named(Named::PageUp) => Some(Message::KeyPressed(key)),
+            Key::Named(Named::Enter) => Some(Message::ActivateSelected),
+            Key::Named(Named::ArrowRight) if status == Status::Ignored => {
+                Some(Message::SelectNext)
+            }
+            Key::Named(Named::ArrowLeft) if status == Status::Ignored => {
+                Some(Message::SelectPrev)
+            }
+            Key::Named(Named::ArrowDown) if status == Status::Ignored => {
+                Some(Message::SelectDown)
+            }
+            Key::Named(Named::ArrowUp) if status == Status::Ignored => {
+                Some(Message::SelectUp)
+            }
             // Route backspace and printable characters to the search query when
             // no widget (e.g. a focused text_input) already consumed the event.
             Key::Named(Named::Backspace) if status == Status::Ignored => {
@@ -245,6 +300,7 @@ mod tests {
             query: String::new(),
             config: Config { columns: 3, rows: 2, icon_size: 64 },
             page: 0,
+            selected: None,
         }
     }
 

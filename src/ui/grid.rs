@@ -1,6 +1,6 @@
 use iced::{
     widget::{button, column, image, row, svg, text, Space},
-    Alignment, Color, Element, Length,
+    Alignment, Background, Border, Color, Element, Length,
 };
 
 /// Fallback icon shown when no icon can be resolved for an app.
@@ -24,15 +24,21 @@ pub fn app_grid<'a>(
     apps: &'a [AppEntry],
     indices: &[usize],
     config: &Config,
+    highlighted: Option<usize>,
 ) -> Element<'a, Message> {
     let icon_size = config.icon_size as f32;
 
     let mut rows: Vec<Element<'a, Message>> = indices
         .chunks(config.columns)
-        .map(|chunk| {
+        .enumerate()
+        .map(|(row_idx, chunk)| {
             let mut cells: Vec<Element<'a, Message>> = chunk
                 .iter()
-                .map(|&idx| {
+                .enumerate()
+                .map(|(col_idx, &idx)| {
+                    let page_position = row_idx * config.columns + col_idx;
+                    let is_selected = highlighted == Some(page_position);
+
                     let app = &apps[idx];
 
                     let icon: Element<'a, Message> = match &app.icon {
@@ -63,9 +69,18 @@ pub fn app_grid<'a>(
                         .padding(12)
                         .width(Length::Fill)
                         .height(Length::Fill)
-                        .style(|_theme, _status| button::Style {
+                        .style(move |_theme, _status| button::Style {
                             text_color: Color::WHITE,
-                            background: None,
+                            background: if is_selected {
+                                Some(Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.15 }))
+                            } else {
+                                None
+                            },
+                            border: if is_selected {
+                                Border { radius: 8.0.into(), ..Default::default() }
+                            } else {
+                                Border::default()
+                            },
                             ..Default::default()
                         })
                         .into()
