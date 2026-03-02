@@ -12,7 +12,7 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - Escape to close
 - Launches on the active screen
 
-<img width="1009" height="867" alt="image" src="https://github.com/user-attachments/assets/c7145631-065e-4522-856d-e6763bb0f8f0" />
+![trebuchet screenshot](assets/screenshot.png)
 
 ## Requirements
 
