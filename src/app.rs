@@ -114,7 +114,7 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         }
         Message::AppActivated(idx) => {
             if let Some(app) = state.apps.get(idx) {
-                launch_app(&app.exec.clone());
+                launch_app(&app.exec.clone(), app.terminal);
                 std::process::exit(0);
             }
         }
@@ -157,7 +157,7 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             if let Some(sel) = state.selected {
                 if let Some(&app_idx) = state.filtered.get(sel) {
                     if let Some(app) = state.apps.get(app_idx) {
-                        launch_app(&app.exec.clone());
+                        launch_app(&app.exec.clone(), app.terminal);
                         std::process::exit(0);
                     }
                 }
@@ -291,7 +291,7 @@ mod tests {
     fn make_state(names: &[&str]) -> Trebuchet {
         let apps = names
             .iter()
-            .map(|n| AppEntry { name: n.to_string(), exec: n.to_string(), icon: None })
+            .map(|n| AppEntry { name: n.to_string(), exec: n.to_string(), terminal: false, icon: None })
             .collect::<Vec<_>>();
         let filtered = (0..apps.len()).collect();
         Trebuchet {

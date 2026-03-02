@@ -18,6 +18,7 @@ pub enum IconHandle {
 pub struct AppEntry {
     pub name: String,
     pub exec: String,
+    pub terminal: bool,
     pub icon: Option<IconHandle>,
 }
 
@@ -84,7 +85,9 @@ pub fn scan_applications() -> Vec<AppEntry> {
                 _ => try_embedded_by_name(&name).or(system_icon),
             };
 
-            entries.push(AppEntry { name, exec, icon });
+            let terminal = content.lines().any(|l| l.trim() == "Terminal=true");
+
+            entries.push(AppEntry { name, exec, terminal, icon });
         }
     }
 
@@ -208,9 +211,47 @@ pub(crate) fn clean_exec(exec: &str) -> String {
         .join(" ")
 }
 
+/// Find an available terminal emulator, returning (binary, exec_flag).
+/// Most terminals use `-e`; wezterm uses `start --`.
+fn find_terminal() -> Option<(&'static str, &'static str)> {
+    let candidates: &[(&str, &str)] = &[
+        ("foot",     "-e"),
+        ("kitty",    "-e"),
+        ("alacritty","-e"),
+        ("ghostty",  "-e"),
+        ("wezterm",  "start --"),
+        ("xterm",    "-e"),
+    ];
+    // Honour $TERMINAL if set and it matches one of the known candidates.
+    if let Ok(t) = std::env::var("TERMINAL") {
+        if let Some(&entry) = candidates.iter().find(|(bin, _)| *bin == t.as_str()) {
+            return Some(entry);
+        }
+    }
+    candidates.iter().find(|(bin, _)| {
+        std::process::Command::new("sh")
+            .args(["-c", &format!("command -v {bin}")])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }).copied()
+}
+
 /// Strip desktop field codes and spawn the application.
-pub fn launch_app(exec: &str) {
+/// When `terminal` is true the exec is wrapped with a terminal emulator.
+pub fn launch_app(exec: &str, terminal: bool) {
     let clean = clean_exec(exec);
+
+    if terminal {
+        if let Some((term, flag)) = find_terminal() {
+            let _ = std::process::Command::new("sh")
+                .args(["-c", &format!("{term} {flag} {clean}")])
+                .spawn();
+            return;
+        }
+        // No terminal found — fall through and try to launch directly.
+    }
+
     let mut parts = clean.split_whitespace();
     if let Some(cmd) = parts.next() {
         let args: Vec<&str> = parts.collect();
