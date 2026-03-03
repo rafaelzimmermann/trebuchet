@@ -1,4 +1,4 @@
-use iced::{Element, Task};
+use iced::{widget::markdown, Element, Task};
 use std::time::Duration;
 
 use crate::ai_client::{self, AiRequest};
@@ -18,16 +18,23 @@ pub struct AiState {
     pub status: AiStatus,
     pub prompt: String,
     pub copy_feedback: bool,
+    pub response_items: Vec<markdown::Item>,
 }
 
 impl AiState {
     pub fn new() -> Self {
-        Self { status: AiStatus::Idle, prompt: String::new(), copy_feedback: false }
+        Self {
+            status: AiStatus::Idle,
+            prompt: String::new(),
+            copy_feedback: false,
+            response_items: Vec::new(),
+        }
     }
 
     pub fn start_query(&mut self, prompt: String, config: &Config) -> Task<Message> {
         self.prompt = prompt.clone();
         self.status = AiStatus::Loading { tick: 0 };
+        self.response_items.clear();
         let req = AiRequest {
             prompt,
             provider: config.ai_provider.clone(),
@@ -42,8 +49,14 @@ impl AiState {
         match msg {
             Message::AiResponse(result) => {
                 self.status = match result {
-                    Ok(text) => AiStatus::Done(text),
-                    Err(err) => AiStatus::Error(err),
+                    Ok(text) => {
+                        self.response_items = markdown::parse(&text).collect();
+                        AiStatus::Done(text)
+                    }
+                    Err(err) => {
+                        self.response_items.clear();
+                        AiStatus::Error(err)
+                    }
                 };
             }
             Message::AiRetry => {
@@ -71,13 +84,16 @@ impl AiState {
                     *tick = (*tick + 1) % 3;
                 }
             }
+            Message::LinkClicked(url) => {
+                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+            }
             _ => {}
         }
         Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        ai_panel(&self.status, &self.prompt, self.copy_feedback)
+        ai_panel(&self.status, &self.prompt, self.copy_feedback, &self.response_items)
     }
 
     pub fn is_loading(&self) -> bool {

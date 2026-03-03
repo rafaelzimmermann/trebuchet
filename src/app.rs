@@ -59,6 +59,7 @@ pub enum Message {
     AiLoadingTick,
     ShakeTick,
     AiCopied,
+    LinkClicked(String),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

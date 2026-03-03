@@ -1,11 +1,17 @@
 use iced::{
-    widget::{container, row, svg, text, text_input, Id, Space},
+    widget::{container, row, svg, text_input, Id, Space},
     Alignment, Background, Border, Color, Element, Length,
 };
 
 use crate::app::{Message, ShakeState};
 
 pub const SEARCH_ID: &str = "trebuchet_search";
+
+const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="11" cy="11" r="7"/>
+  <line x1="16.5" y1="16.5" x2="21" y2="21"/>
+</svg>"#;
 
 const ROBOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
   fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round">
@@ -20,14 +26,11 @@ const ROBOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
 const SHAKE_OFFSETS: [f32; 6] = [-8.0, 8.0, -5.0, 5.0, -2.0, 0.0];
 
 pub fn search_bar<'a>(query: &str, shake: &ShakeState) -> Element<'a, Message> {
-    let icon: Element<'a, Message> = if query.starts_with("/ai") {
-        svg(svg::Handle::from_memory(ROBOT_SVG.to_vec()))
-            .width(20)
-            .height(20)
-            .into()
-    } else {
-        text("🔍").size(18).color(Color::WHITE).into()
-    };
+    let icon_bytes = if query.starts_with("/ai") { ROBOT_SVG } else { SEARCH_SVG };
+    let icon: Element<'a, Message> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
+        .width(20)
+        .height(20)
+        .into();
 
     let input = text_input("Search apps...", query)
         .id(Id::new(SEARCH_ID))

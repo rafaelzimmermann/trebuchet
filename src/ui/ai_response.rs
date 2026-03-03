@@ -1,7 +1,7 @@
 use iced::{
     alignment,
-    widget::{button, column, container, row, scrollable, svg, text, Space},
-    Alignment, Background, Border, Color, Element, Length,
+    widget::{button, column, container, markdown, row, scrollable, svg, text, Space},
+    Alignment, Background, Border, Color, Element, Font, Length, Padding,
 };
 
 use crate::app::Message;
@@ -45,7 +45,27 @@ fn icon_btn<'a>(icon_bytes: &'static [u8], msg: Message, enabled: bool) -> iced:
     btn
 }
 
-pub fn ai_panel<'a>(status: &'a AiStatus, prompt: &str, copy_feedback: bool) -> Element<'a, Message> {
+fn md_settings() -> markdown::Settings {
+    markdown::Settings::with_text_size(15, markdown::Style {
+        font: Font::default(),
+        inline_code_highlight: markdown::Highlight {
+            background: Background::Color(Color { r: 0.18, g: 0.18, b: 0.26, a: 1.0 }),
+            border: Border { radius: 3.0.into(), ..Default::default() },
+        },
+        inline_code_padding: Padding { top: 1.0, right: 4.0, bottom: 1.0, left: 4.0 },
+        inline_code_color: Color { r: 0.95, g: 0.78, b: 0.50, a: 1.0 },
+        inline_code_font: Font::MONOSPACE,
+        code_block_font: Font::MONOSPACE,
+        link_color: Color { r: 0.45, g: 0.75, b: 1.0, a: 1.0 },
+    })
+}
+
+pub fn ai_panel<'a>(
+    status: &'a AiStatus,
+    prompt: &str,
+    copy_feedback: bool,
+    items: &'a [markdown::Item],
+) -> Element<'a, Message> {
     let can_copy  = matches!(status, AiStatus::Done(_));
     let can_retry = matches!(status, AiStatus::Done(_) | AiStatus::Error(_));
 
@@ -78,12 +98,9 @@ pub fn ai_panel<'a>(status: &'a AiStatus, prompt: &str, copy_feedback: bool) -> 
                 .into()
         }
 
-        AiStatus::Done(response) => scrollable(
+        AiStatus::Done(_) => scrollable(
             container(
-                text(response.as_str())
-                    .size(15)
-                    .color(Color { r: 0.91, g: 0.91, b: 0.91, a: 1.0 })
-                    .line_height(1.6f32),
+                markdown::view(items, md_settings()).map(Message::LinkClicked),
             )
             .width(Length::Fill)
             .padding(4),

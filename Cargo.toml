@@ -5,7 +5,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-iced = { version = "0.14", features = ["image", "svg", "tokio"] }
+iced = { version = "0.14", features = ["image", "svg", "tokio", "markdown"] }
 iced_layershell = "0.15"
 freedesktop-desktop-entry = "0.8"
 xdg = "3.0"

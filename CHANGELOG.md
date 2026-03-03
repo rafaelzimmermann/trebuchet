@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- AI response rendered as formatted markdown (headings, bold, inline code, code blocks, lists, links)
+- Clicking a link in the AI response opens it with `xdg-open`; copying still sends raw markdown to the clipboard
+- Search bar magnifying glass replaced with a matching SVG icon (same stroke style as the robot icon)
 - `/ai` inline AI assistant: type `/ai <question>` to query an AI provider without leaving the launcher
 - Multi-provider support: OpenAI, Anthropic, Gemini, and Ollama (local)
 - Scrollable response area with Copy and Retry icon buttons
