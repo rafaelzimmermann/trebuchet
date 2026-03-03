@@ -99,6 +99,8 @@ cargo run --release
 
 Type `/ai` followed by your question to query an AI provider directly from the launcher.
 
+![AI assistant](assets/trebuchet-ai-assistent.png)
+
 ```
 /ai what is a trebuchet
 /ai how do I centre a div in CSS
