@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 - Config loading is layered: hardcoded Rust defaults → embedded conf → user conf
 - Unit tests for config parsing (missing keys, invalid values, unknown keys, whitespace, comments)
 - Updated README: configuration section, keyboard navigation, terminal app support
+- `install.sh`: deploy default config to `~/.config/trebuchet/trebuchet.conf` on install; prompt before overwriting an existing one
+- `install.sh`: `--uninstall` now removes `~/.config/trebuchet/` in addition to the binary and data files
+- `install.sh`: `--yes` / `-y` flag to assume yes for all prompts (non-interactive installs)
 
 ## [0.0.1] - 2026-03-02
 

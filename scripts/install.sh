@@ -10,6 +10,7 @@
 #   --user        install to ~/.local/bin instead of /usr/local/bin
 #   --no-icons    skip fetching high-resolution icons
 #   --uninstall   remove installed files
+#   --yes         assume yes for all prompts (non-interactive)
 #
 # When run from the project root (where Cargo.toml lives), the local source is used.
 # Otherwise the repository is cloned automatically.
@@ -21,12 +22,14 @@ set -euo pipefail
 SYSTEM=true
 FETCH_ICONS=true
 UNINSTALL=false
+YES=false
 
 for arg in "$@"; do
     case "$arg" in
         --user)      SYSTEM=false ;;
         --no-icons)  FETCH_ICONS=false ;;
         --uninstall) UNINSTALL=true ;;
+        --yes|-y)    YES=true ;;
         # Legacy flags (now the default — kept for compatibility)
         --system)    SYSTEM=true ;;
         --icons)     FETCH_ICONS=true ;;
@@ -53,6 +56,8 @@ fi
 BINARY="$BIN_DIR/trebuchet"
 ICON_DEST="$DATA_DIR/icons"
 DESKTOP_FILE="$DESKTOP_DIR/trebuchet.desktop"
+CONFIG_DIR="${HOME}/.config/trebuchet"
+CONFIG_FILE="$CONFIG_DIR/trebuchet.conf"
 
 # ── Privilege helpers ─────────────────────────────────────────────────────────
 # Use sudo only when --system and we're not already root.
@@ -84,6 +89,7 @@ if $UNINSTALL; then
     priv_rm -f  "$BINARY"
     priv_rm -f  "$DESKTOP_FILE"
     priv_rm -rf "$DATA_DIR"
+    rm -rf "$CONFIG_DIR"
     echo "Done."
     exit 0
 fi
@@ -126,6 +132,25 @@ if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
     priv_cp -r assets/icons/. "$ICON_DEST/"
 fi
 
+# Install default config; prompt before overwriting an existing one.
+mkdir -p "$CONFIG_DIR"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Installing default config to $CONFIG_FILE…"
+    cp assets/trebuchet.conf "$CONFIG_FILE"
+else
+    if $YES; then
+        reply="y"
+    else
+        read -r -p "Config already exists at $CONFIG_FILE. Overwrite? [y/N] " reply
+    fi
+    if [[ "${reply,,}" == "y" ]]; then
+        cp assets/trebuchet.conf "$CONFIG_FILE"
+        echo "Config replaced."
+    else
+        echo "Keeping existing config."
+    fi
+fi
+
 priv_mkdir "$DESKTOP_DIR"
 priv_tee "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
@@ -141,6 +166,7 @@ echo ""
 echo "Installed:  $BINARY"
 [[ -d "$ICON_DEST" ]] && echo "Icons:      $ICON_DEST"
 echo "Desktop:    $DESKTOP_FILE"
+echo "Config:     $CONFIG_FILE"
 echo ""
 
 # Warn if the bin dir isn't on PATH.
