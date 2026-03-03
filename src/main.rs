@@ -8,6 +8,7 @@ mod ai_client;
 mod app;
 mod config;
 mod launcher;
+mod modes;
 mod ui;
 
 fn main() -> iced_layershell::Result {

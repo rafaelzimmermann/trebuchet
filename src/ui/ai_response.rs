@@ -4,7 +4,8 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length,
 };
 
-use crate::app::{AiStatus, Message};
+use crate::app::Message;
+use crate::modes::AiStatus;
 
 const VERBS: [&str; 4] = ["Catapulting", "Launching", "Hurling", "Slinging"];
 

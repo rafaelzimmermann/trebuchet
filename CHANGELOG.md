@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `/ai` inline AI assistant: type `/ai <question>` to query an AI provider without leaving the launcher
+- Multi-provider support: OpenAI, Anthropic, Gemini, and Ollama (local)
+- Scrollable response area with Copy and Retry icon buttons
+- "Copied to clipboard" feedback on copy (auto-dismisses after 2 s via `wl-copy`)
+- Animated loading indicator with trebuchet-themed verbs (Catapulting, Launching…)
+- Robot icon in search bar while in AI mode; shake animation on empty prompt submit
+- Escape in AI mode returns to the app grid (app stays open)
+- `src/modes/` architecture: each mode owns its state and message handling, making future modes easy to add
+  - `modes::search` — `SearchState` with filter, pagination, and selection logic
+  - `modes::ai` — `AiStatus` + `AiState` with full AI lifecycle (query, retry, copy, tick)
+- `ai_provider`, `ai_api_key`, `ai_model`, `ai_base_url` config keys with per-provider documentation
+- Quoted config values are stripped automatically (e.g. `ai_provider = "anthropic"` works)
+- `install.sh`: interactive AI setup wizard (provider menu, model, API key, base URL)
+- `install.sh`: AI wizard is skipped when config is not freshly installed or overwritten
 - `Terminal=true` desktop entry support: apps that require a terminal are now launched inside an auto-detected terminal emulator (`$TERMINAL`, foot, kitty, alacritty, ghostty, wezterm, xterm)
 - `AppEntry::terminal` field parsed from desktop entry files
 - File-based configuration: `~/.config/trebuchet/trebuchet.conf` loaded at startup
