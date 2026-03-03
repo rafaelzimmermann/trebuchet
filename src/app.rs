@@ -4,15 +4,42 @@ use iced::{
     event,
     keyboard::{self, key::Named, Key},
     mouse,
+    time,
     widget::{button, column, container, row, text},
     Background, Border, Color, Element, Event, Length, Subscription, Task,
 };
 use iced::event::Status;
 use iced_layershell::to_layer_message;
+use std::time::Duration;
 
+use crate::ai_client::{self, AiRequest};
 use crate::config::Config;
 use crate::launcher::{launch_app, scan_applications, AppEntry};
-use crate::ui::{app_grid, search_bar};
+use crate::ui::{ai_panel, app_grid, search_bar};
+
+// ── New mode/state types ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppMode {
+    Default,
+    Ai,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AiStatus {
+    Idle,
+    Loading { tick: u8 },
+    Done(String),
+    Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShakeState {
+    pub active: bool,
+    pub tick: u8,
+}
+
+// ── App state ───────────────────────────────────────────────────────────────
 
 pub struct Trebuchet {
     pub apps: Vec<AppEntry>,
@@ -21,7 +48,14 @@ pub struct Trebuchet {
     pub config: Config,
     pub page: usize,
     pub selected: Option<usize>,
+    pub mode: AppMode,
+    pub ai_status: AiStatus,
+    pub ai_prompt: String,
+    pub shake_state: ShakeState,
+    pub copy_feedback: bool,
 }
+
+// ── Messages ─────────────────────────────────────────────────────────────────
 
 #[to_layer_message]
 #[derive(Debug, Clone)]
@@ -40,7 +74,16 @@ pub enum Message {
     SelectDown,
     SelectUp,
     ActivateSelected,
+    AiSubmit,
+    AiResponse(Result<String, String>),
+    AiRetry,
+    AiCopyResponse,
+    AiLoadingTick,
+    ShakeTick,
+    AiCopied,
 }
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
     let apps = scan_applications();
@@ -52,6 +95,11 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         config: Config::load(),
         page: 0,
         selected: None,
+        mode: AppMode::Default,
+        ai_status: AiStatus::Idle,
+        ai_prompt: String::new(),
+        shake_state: ShakeState::default(),
+        copy_feedback: false,
     };
     (state, Task::none())
 }
@@ -59,6 +107,8 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
 pub fn namespace() -> String {
     "trebuchet".into()
 }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn apply_filter(state: &mut Trebuchet) {
     if state.query.is_empty() {
@@ -93,6 +143,30 @@ fn move_selection(state: &mut Trebuchet, delta: isize) {
     state.page = next / page_size;
 }
 
+/// Sync mode based on current query; clears AI state when leaving AI mode.
+fn sync_mode(state: &mut Trebuchet) {
+    let new_mode = if state.query.starts_with("/ai") { AppMode::Ai } else { AppMode::Default };
+    if new_mode != state.mode {
+        state.mode = new_mode;
+        if state.mode == AppMode::Default {
+            state.ai_status = AiStatus::Idle;
+            state.ai_prompt.clear();
+        }
+    }
+}
+
+fn make_ai_request(state: &Trebuchet, prompt: String) -> AiRequest {
+    AiRequest {
+        prompt,
+        provider: state.config.ai_provider.clone(),
+        api_key: state.config.ai_api_key.clone(),
+        model: state.config.ai_model.clone(),
+        base_url: state.config.ai_base_url.clone(),
+    }
+}
+
+// ── Update ───────────────────────────────────────────────────────────────────
+
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     let page_size = state.config.columns * state.config.rows;
 
@@ -101,16 +175,19 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             state.query = query;
             state.page = 0;
             apply_filter(state);
+            sync_mode(state);
         }
         Message::SearchAppend(c) => {
             state.query.push_str(&c);
             state.page = 0;
             apply_filter(state);
+            sync_mode(state);
         }
         Message::SearchBackspace => {
             state.query.pop();
             state.page = 0;
             apply_filter(state);
+            sync_mode(state);
         }
         Message::AppActivated(idx) => {
             if let Some(app) = state.apps.get(idx) {
@@ -119,7 +196,18 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             }
         }
         Message::KeyPressed(key) => match key {
-            Key::Named(Named::Escape) => std::process::exit(0),
+            Key::Named(Named::Escape) => {
+                if state.mode == AppMode::Ai {
+                    state.query.clear();
+                    state.mode = AppMode::Default;
+                    state.ai_status = AiStatus::Idle;
+                    state.ai_prompt.clear();
+                    state.page = 0;
+                    apply_filter(state);
+                } else {
+                    std::process::exit(0);
+                }
+            }
             Key::Named(Named::PageDown) => {
                 let total = pages(state.filtered.len(), page_size);
                 if state.page + 1 < total {
@@ -163,10 +251,73 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 }
             }
         }
+        Message::AiSubmit => {
+            if state.mode == AppMode::Default {
+                if let Some(sel) = state.selected {
+                    if let Some(&app_idx) = state.filtered.get(sel) {
+                        if let Some(app) = state.apps.get(app_idx) {
+                            launch_app(&app.exec.clone(), app.terminal);
+                            std::process::exit(0);
+                        }
+                    }
+                }
+            } else {
+                let prompt = state.query.trim_start_matches("/ai").trim().to_string();
+                if prompt.is_empty() {
+                    state.shake_state = ShakeState { active: true, tick: 0 };
+                    return Task::none();
+                }
+                state.ai_prompt = prompt.clone();
+                state.ai_status = AiStatus::Loading { tick: 0 };
+                let req = make_ai_request(state, prompt);
+                return Task::perform(ai_client::query(req), Message::AiResponse);
+            }
+        }
+        Message::AiResponse(result) => {
+            state.ai_status = match result {
+                Ok(text) => AiStatus::Done(text),
+                Err(err) => AiStatus::Error(err),
+            };
+        }
+        Message::AiRetry => {
+            let prompt = state.ai_prompt.clone();
+            if prompt.is_empty() {
+                return Task::none();
+            }
+            state.ai_status = AiStatus::Loading { tick: 0 };
+            let req = make_ai_request(state, prompt);
+            return Task::perform(ai_client::query(req), Message::AiResponse);
+        }
+        Message::AiCopyResponse => {
+            if let AiStatus::Done(text) = &state.ai_status {
+                let _ = std::process::Command::new("wl-copy").arg(text).spawn();
+                state.copy_feedback = true;
+                return Task::perform(
+                    async { tokio::time::sleep(Duration::from_secs(2)).await },
+                    |_| Message::AiCopied,
+                );
+            }
+        }
+        Message::AiCopied => {
+            state.copy_feedback = false;
+        }
+        Message::AiLoadingTick => {
+            if let AiStatus::Loading { tick } = &mut state.ai_status {
+                *tick = (*tick + 1) % 3;
+            }
+        }
+        Message::ShakeTick => {
+            state.shake_state.tick += 1;
+            if state.shake_state.tick >= 6 {
+                state.shake_state = ShakeState::default();
+            }
+        }
         _ => {}
     }
     Task::none()
 }
+
+// ── View ─────────────────────────────────────────────────────────────────────
 
 pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     let page_size = state.config.columns * state.config.rows;
@@ -201,10 +352,18 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         if s >= start && s < end { Some(s - start) } else { None }
     });
 
+    let body: Element<'_, Message> = match state.mode {
+        AppMode::Default => column![
+            app_grid(&state.apps, page_slice, &state.config, highlighted),
+            pagination,
+        ]
+        .into(),
+        AppMode::Ai => ai_panel(&state.ai_status, &state.ai_prompt, state.copy_feedback),
+    };
+
     let content = column![
-        search_bar(&state.query),
-        app_grid(&state.apps, page_slice, &state.config, highlighted),
-        pagination,
+        search_bar(&state.query, &state.shake_state),
+        body,
     ]
     .spacing(16)
     .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
@@ -230,17 +389,21 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         .into()
 }
 
+// ── Pages helper ──────────────────────────────────────────────────────────────
+
 pub(crate) fn pages(total: usize, page_size: usize) -> usize {
     if page_size == 0 { 1 } else { total.div_ceil(page_size) }
 }
 
+// ── Event handler ─────────────────────────────────────────────────────────────
+
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match event {
-        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => match &key {
+        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => match &key {
             Key::Named(Named::Escape)
             | Key::Named(Named::PageDown)
             | Key::Named(Named::PageUp) => Some(Message::KeyPressed(key)),
-            Key::Named(Named::Enter) => Some(Message::ActivateSelected),
+            Key::Named(Named::Enter) => Some(Message::AiSubmit),
             Key::Named(Named::ArrowRight) if status == Status::Ignored => {
                 Some(Message::SelectNext)
             }
@@ -258,13 +421,17 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
             Key::Named(Named::Backspace) if status == Status::Ignored => {
                 Some(Message::SearchBackspace)
             }
-            Key::Character(c)
+            Key::Named(Named::Space) if status == Status::Ignored => {
+                Some(Message::SearchAppend(" ".to_string()))
+            }
+            Key::Character(_)
                 if status == Status::Ignored
                     && !modifiers.control()
                     && !modifiers.alt()
                     && !modifiers.logo() =>
             {
-                Some(Message::SearchAppend(c.to_string()))
+                // Use `text` (not `key`) so Shift, dead keys and compose are respected.
+                text.as_ref().map(|t| Message::SearchAppend(t.to_string()))
             }
             _ => None,
         },
@@ -278,9 +445,27 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
     }
 }
 
-pub fn subscription(_state: &Trebuchet) -> Subscription<Message> {
-    event::listen_with(on_event)
+// ── Subscription ──────────────────────────────────────────────────────────────
+
+pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
+    let events = event::listen_with(on_event);
+
+    let loading = if matches!(state.ai_status, AiStatus::Loading { .. }) {
+        time::every(Duration::from_millis(400)).map(|_| Message::AiLoadingTick)
+    } else {
+        Subscription::none()
+    };
+
+    let shake = if state.shake_state.active {
+        time::every(Duration::from_millis(67)).map(|_| Message::ShakeTick)
+    } else {
+        Subscription::none()
+    };
+
+    Subscription::batch([events, loading, shake])
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -298,9 +483,14 @@ mod tests {
             apps,
             filtered,
             query: String::new(),
-            config: Config { columns: 3, rows: 2, icon_size: 64 },
+            config: Config { columns: 3, rows: 2, icon_size: 64, ..Config::default() },
             page: 0,
             selected: None,
+            mode: AppMode::Default,
+            ai_status: AiStatus::Idle,
+            ai_prompt: String::new(),
+            shake_state: ShakeState::default(),
+            copy_feedback: false,
         }
     }
 

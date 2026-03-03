@@ -1,9 +1,22 @@
 const DEFAULT_CONF: &str = include_str!("../assets/trebuchet.conf");
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum AiProvider {
+    #[default]
+    OpenAi,
+    Anthropic,
+    Gemini,
+    Ollama,
+}
+
 pub struct Config {
     pub columns: usize,
     pub rows: usize,
     pub icon_size: u32,
+    pub ai_provider: AiProvider,
+    pub ai_api_key: Option<String>,
+    pub ai_model: Option<String>,
+    pub ai_base_url: Option<String>,
 }
 
 impl Config {
@@ -34,11 +47,20 @@ impl Config {
                 continue;
             }
             if let Some((key, val)) = line.split_once('=') {
-                let val = val.trim();
+                let val = val.trim().trim_matches('"');
                 match key.trim() {
                     "columns"   => { if let Ok(v) = val.parse() { base.columns   = v; } }
                     "rows"      => { if let Ok(v) = val.parse() { base.rows      = v; } }
                     "icon_size" => { if let Ok(v) = val.parse() { base.icon_size = v; } }
+                    "ai_provider" => base.ai_provider = match val {
+                        "anthropic" => AiProvider::Anthropic,
+                        "gemini"    => AiProvider::Gemini,
+                        "ollama"    => AiProvider::Ollama,
+                        _           => AiProvider::OpenAi,
+                    },
+                    "ai_api_key"  => base.ai_api_key  = Some(val.to_string()),
+                    "ai_model"    => base.ai_model    = Some(val.to_string()),
+                    "ai_base_url" => if !val.is_empty() { base.ai_base_url = Some(val.to_string()); },
                     _ => {}
                 }
             }
@@ -49,7 +71,15 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { columns: 7, rows: 5, icon_size: 96 }
+        Self {
+            columns: 7,
+            rows: 5,
+            icon_size: 96,
+            ai_provider: AiProvider::default(),
+            ai_api_key: None,
+            ai_model: None,
+            ai_base_url: None,
+        }
     }
 }
 
@@ -83,7 +113,7 @@ mod tests {
 
     #[test]
     fn missing_key_keeps_base() {
-        let base = Config { columns: 4, rows: 3, icon_size: 48 };
+        let base = Config { columns: 4, rows: 3, icon_size: 48, ..Config::default() };
         let cfg = Config::parse(base, "icon_size = 64");
         assert_eq!(cfg.columns, 4);
         assert_eq!(cfg.rows, 3);

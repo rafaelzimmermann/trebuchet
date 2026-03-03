@@ -4,6 +4,7 @@ use iced_layershell::{
     Settings,
 };
 
+mod ai_client;
 mod app;
 mod config;
 mod launcher;
