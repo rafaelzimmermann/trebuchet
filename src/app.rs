@@ -257,17 +257,11 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
 pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
     let events = event::listen_with(on_event);
 
-    let loading = if state.mode.is_ai_loading() {
-        time::every(Duration::from_millis(400)).map(|_| Message::AiLoadingTick)
-    } else {
-        Subscription::none()
-    };
-
     let shake = if state.shake_state.active {
         time::every(Duration::from_millis(67)).map(|_| Message::ShakeTick)
     } else {
         Subscription::none()
     };
 
-    Subscription::batch([events, loading, shake])
+    Subscription::batch([events, state.mode.subscription(), shake])
 }

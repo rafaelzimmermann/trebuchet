@@ -1,6 +1,5 @@
-use iced::{widget::markdown, Element, Task};
+use iced::{widget::markdown, time, Element, Subscription, Task};
 use std::time::Duration;
-
 use crate::ai_client::{self, AiRequest};
 use crate::app::Message;
 use crate::config::Config;
@@ -96,7 +95,11 @@ impl AiState {
         ai_panel(&self.status, &self.prompt, self.copy_feedback, &self.response_items)
     }
 
-    pub fn is_loading(&self) -> bool {
-        matches!(self.status, AiStatus::Loading { .. })
+    pub fn subscription(&self) -> Subscription<Message> {
+        if matches!(self.status, AiStatus::Loading { .. }) {
+            time::every(Duration::from_millis(400)).map(|_| Message::AiLoadingTick)
+        } else {
+            Subscription::none()
+        }
     }
 }
