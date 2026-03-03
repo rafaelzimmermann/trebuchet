@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
 - `install.sh`: deploy default config to `~/.config/trebuchet/trebuchet.conf` on install; prompt before overwriting an existing one
 - `install.sh`: `--uninstall` now removes `~/.config/trebuchet/` in addition to the binary and data files
 - `install.sh`: `--yes` / `-y` flag to assume yes for all prompts (non-interactive installs)
+- `install.sh`: prompt before updating existing icons; skip with `--yes`
+- `install.sh`: `confirm()` helper consolidates all interactive prompts
 
 ## [0.0.1] - 2026-03-02
 

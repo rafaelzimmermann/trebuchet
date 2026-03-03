@@ -82,6 +82,15 @@ priv_cp() { $PRIV cp "$@"; }
 priv_tee() { $PRIV tee "$@" >/dev/null; }
 priv_rm() { $PRIV rm "$@"; }
 
+# confirm <prompt>  — returns 0 (yes) or 1 (no).
+# With --yes, always returns 0 without prompting.
+confirm() {
+    if $YES; then return 0; fi
+    local reply
+    read -r -p "$1 [y/N] " reply
+    [[ "${reply,,}" == "y" ]]
+}
+
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 
 if $UNINSTALL; then
@@ -111,8 +120,17 @@ fi
 # ── Icons ─────────────────────────────────────────────────────────────────────
 
 if $FETCH_ICONS; then
-    echo "Fetching icons…"
-    bash scripts/fetch-icons.sh
+    if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
+        if confirm "Icons already exist. Update them?"; then
+            echo "Updating icons…"
+            bash scripts/fetch-icons.sh
+        else
+            echo "Keeping existing icons."
+        fi
+    else
+        echo "Fetching icons…"
+        bash scripts/fetch-icons.sh
+    fi
 fi
 
 # ── Build (always as the invoking user) ───────────────────────────────────────
@@ -138,12 +156,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "Installing default config to $CONFIG_FILE…"
     cp assets/trebuchet.conf "$CONFIG_FILE"
 else
-    if $YES; then
-        reply="y"
-    else
-        read -r -p "Config already exists at $CONFIG_FILE. Overwrite? [y/N] " reply
-    fi
-    if [[ "${reply,,}" == "y" ]]; then
+    if confirm "Config already exists at $CONFIG_FILE. Overwrite?"; then
         cp assets/trebuchet.conf "$CONFIG_FILE"
         echo "Config replaced."
     else

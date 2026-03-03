@@ -3,5 +3,4 @@
 
 # Bundled icons are fetched at setup time, not committed.
 # Run:  bash scripts/fetch-icons.sh
-assets/icons/*.svg
-assets/icons/*.png
+assets/icons
