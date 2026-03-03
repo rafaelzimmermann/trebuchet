@@ -13,6 +13,7 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - Terminal apps (`Terminal=true`) are auto-detected and launched in your terminal emulator
 - Escape to close
 - Launches on the active screen
+- Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model without leaving the launcher
 
 ![trebuchet screenshot](assets/trebuchet-fullview.png)
 
@@ -93,6 +94,44 @@ cargo run --release
 | Enter | Launch selected application |
 | Click | Launch application |
 | Escape | Close launcher |
+
+## AI assistant
+
+Type `/ai` followed by your question to query an AI provider directly from the launcher.
+
+```
+/ai what is a trebuchet
+/ai how do I centre a div in CSS
+```
+
+The search bar icon switches to a robot while you are in AI mode. The response is rendered as formatted markdown — headings, code blocks, bold text, and links are all styled. Clicking a link opens it in your browser. The **copy** button sends the raw markdown to the clipboard so it pastes cleanly into any editor.
+
+Press **Escape** to leave AI mode and return to the app grid without closing the launcher.
+
+### Providers
+
+| Provider | Config value | Needs API key |
+|----------|-------------|---------------|
+| OpenAI | `openai` | Yes |
+| Anthropic | `anthropic` | Yes |
+| Google Gemini | `gemini` | Yes |
+| Ollama (local) | `ollama` | No |
+
+The install script offers an interactive setup wizard. To configure manually, add the following to `~/.config/trebuchet/trebuchet.conf`:
+
+```ini
+ai_provider = anthropic
+ai_api_key  = sk-ant-...
+ai_model    = claude-sonnet-4-6   # optional, falls back to provider default
+```
+
+For Ollama, set the base URL instead of an API key:
+
+```ini
+ai_provider = ollama
+ai_base_url = http://localhost:11434
+ai_model    = llama3.2
+```
 
 ## Configuration
 
