@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `Terminal=true` desktop entry support: apps that require a terminal are now launched inside an auto-detected terminal emulator (`$TERMINAL`, foot, kitty, alacritty, ghostty, wezterm, xterm)
 - `AppEntry::terminal` field parsed from desktop entry files
+- File-based configuration: `~/.config/trebuchet/trebuchet.conf` loaded at startup
+- `assets/trebuchet.conf` embedded in the binary as the authoritative default config; missing or invalid user keys fall back to it
+- Config loading is layered: hardcoded Rust defaults → embedded conf → user conf
+- Unit tests for config parsing (missing keys, invalid values, unknown keys, whitespace, comments)
+- Updated README: configuration section, keyboard navigation, terminal app support
 
 ## [0.0.1] - 2026-03-02
 

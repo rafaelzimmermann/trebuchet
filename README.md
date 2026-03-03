@@ -7,8 +7,10 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 ## Features
 
 - Screen overlay using the Wayland layer-shell protocol
-- Real-time fuzzy search across all installed applications
-- Icon display from the system icon theme
+- Real-time search across all installed applications — type anywhere
+- Icon display from the system icon theme (with bundled high-resolution fallbacks)
+- Keyboard navigation with arrow keys and Enter to launch
+- Terminal apps (`Terminal=true`) are auto-detected and launched in your terminal emulator
 - Escape to close
 - Launches on the active screen
 
@@ -63,7 +65,7 @@ bind = SUPER, Space, exec, trebuchet
 trebuchet ships a script that populates `assets/icons/` with high-resolution SVGs
 for ~80 common applications. It checks locally installed icon themes first
 (Papirus, Breeze, hicolor …) and falls back to downloading from
-[Papirus on GitHub](https://github.com/PapirusIconTheme/papirus-icon-theme) (GPL-3.0).
+[Papirus on GitHub](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) (GPL-3.0).
 
 ```sh
 bash scripts/fetch-icons.sh
@@ -86,19 +88,30 @@ cargo run --release
 
 | Action | Effect |
 |--------|--------|
-| Type   | Filter applications by name |
-| Click  | Launch application |
+| Type | Filter applications by name |
+| Arrow keys | Move selection through the grid |
+| Enter | Launch selected application |
+| Click | Launch application |
 | Escape | Close launcher |
 
 ## Configuration
 
-Configuration is currently baked in via `src/config.rs`. Default values:
+trebuchet reads `~/.config/trebuchet/trebuchet.conf` on startup. If the file does not
+exist or a setting is missing, the built-in defaults apply.
+
+```ini
+# ~/.config/trebuchet/trebuchet.conf
+
+columns   = 7
+rows      = 5
+icon_size = 96
+```
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `columns` | `6` | Number of app columns in the grid |
+| `columns` | `7` | Number of app columns in the grid |
+| `rows` | `5` | Number of app rows per page |
 | `icon_size` | `96` | Icon size in pixels |
-| `background_opacity` | `0.85` | Background opacity (0.0–1.0) |
 
 ---
 

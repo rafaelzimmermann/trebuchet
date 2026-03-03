@@ -49,7 +49,7 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         apps,
         filtered,
         query: String::new(),
-        config: Config::default(),
+        config: Config::load(),
         page: 0,
         selected: None,
     };
