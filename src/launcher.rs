@@ -15,6 +15,7 @@ pub enum IconHandle {
     Raster(image::Handle),
 }
 
+#[derive(Clone)]
 pub struct AppEntry {
     pub name: String,
     pub exec: String,

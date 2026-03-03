@@ -16,23 +16,23 @@ const FALLBACK_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox
   <rect x="31" y="34" width="11" height="11" rx="2.5" fill="white" fill-opacity="0.32"/>
 </svg>"#;
 
-use crate::app::Message;
 use crate::config::Config;
 use crate::launcher::{AppEntry, IconHandle};
 
-pub fn app_grid<'a>(
+pub fn app_grid<'a, Msg: Clone + 'a>(
     apps: &'a [AppEntry],
     indices: &[usize],
     config: &Config,
     highlighted: Option<usize>,
-) -> Element<'a, Message> {
+    on_activate: impl Fn(usize) -> Msg + 'a,
+) -> Element<'a, Msg> {
     let icon_size = config.icon_size as f32;
 
-    let mut rows: Vec<Element<'a, Message>> = indices
+    let mut rows: Vec<Element<'a, Msg>> = indices
         .chunks(config.columns)
         .enumerate()
         .map(|(row_idx, chunk)| {
-            let mut cells: Vec<Element<'a, Message>> = chunk
+            let mut cells: Vec<Element<'a, Msg>> = chunk
                 .iter()
                 .enumerate()
                 .map(|(col_idx, &idx)| {
@@ -41,7 +41,7 @@ pub fn app_grid<'a>(
 
                     let app = &apps[idx];
 
-                    let icon: Element<'a, Message> = match &app.icon {
+                    let icon: Element<'a, Msg> = match &app.icon {
                         Some(IconHandle::Vector(handle)) => svg(handle.clone())
                             .width(icon_size)
                             .height(icon_size)
@@ -65,7 +65,7 @@ pub fn app_grid<'a>(
                         .spacing(6);
 
                     button(cell)
-                        .on_press(Message::AppActivated(idx))
+                        .on_press(on_activate(idx))
                         .padding(12)
                         .width(Length::Fill)
                         .height(Length::Fill)
@@ -101,7 +101,7 @@ pub fn app_grid<'a>(
 
     // Pad missing rows so the grid height stays constant while searching.
     while rows.len() < config.rows {
-        let cells: Vec<Element<'a, Message>> = (0..config.columns)
+        let cells: Vec<Element<'a, Msg>> = (0..config.columns)
             .map(|_| Space::new().width(Length::Fill).height(Length::Fill).into())
             .collect();
         rows.push(row(cells).width(Length::Fill).height(Length::Fill).into());

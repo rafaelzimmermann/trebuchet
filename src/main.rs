@@ -4,11 +4,14 @@ use iced_layershell::{
     Settings,
 };
 
+mod ai_agent;
 mod ai_client;
 mod app;
+mod app_launcher;
+mod command;
+mod component;
 mod config;
 mod launcher;
-mod modes;
 mod ui;
 
 fn main() -> iced_layershell::Result {

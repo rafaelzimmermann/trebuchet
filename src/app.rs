@@ -2,35 +2,35 @@ use iced::{
     event,
     keyboard::{self, key::Named, Key},
     mouse,
-    time,
-    widget::{column, container},
+    widget::container,
     Background, Border, Color, Element, Event, Length, Subscription, Task,
 };
 use iced::event::Status;
 use iced_layershell::to_layer_message;
-use std::time::Duration;
 
+use crate::ai_agent::{self, AIAgent};
+use crate::app_launcher::{self, AppLauncher};
+use crate::command::{ComponentEvent, SlashCommand};
+use crate::component::{Component, NavDirection};
 use crate::config::Config;
-use crate::launcher::{launch_app, scan_applications, AppEntry};
-use crate::modes::{ai::AiState, search::SearchState, Mode};
-use crate::ui::search_bar;
+use crate::launcher::{scan_applications, AppEntry};
 
-// ── Shake animation state ─────────────────────────────────────────────────────
+// ── Active component ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ShakeState {
-    pub active: bool,
-    pub tick: u8,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ActiveComponent {
+    Launcher,
+    Ai,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub struct Trebuchet {
     pub apps: Vec<AppEntry>,
-    pub query: String,
     pub config: Config,
-    pub shake_state: ShakeState,
-    pub mode: Mode,
+    pub active: ActiveComponent,
+    pub launcher: AppLauncher,
+    pub ai_agent: AIAgent,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -38,41 +38,36 @@ pub struct Trebuchet {
 #[to_layer_message]
 #[derive(Debug, Clone)]
 pub enum Message {
-    SearchChanged(String),
-    SearchAppend(String),
-    SearchBackspace,
-    AppActivated(usize),
-    KeyPressed(Key),
-    GoToPage(usize),
+    // Raw input events from on_event
+    InputChar(String),
+    InputBackspace,
+    Submit,
+    Escape,
+    NavLeft,
+    NavRight,
+    NavUp,
+    NavDown,
     PageNext,
     PagePrev,
+    GoToPage(usize),
     Close,
-    SelectNext,
-    SelectPrev,
-    SelectDown,
-    SelectUp,
-    ActivateSelected,
-    AiSubmit,
-    AiResponse(Result<String, String>),
-    AiRetry,
-    AiCopyResponse,
-    AiLoadingTick,
-    ShakeTick,
-    AiCopied,
-    LinkClicked(String),
+    // Component message wrappers
+    Launcher(app_launcher::Msg),
+    Ai(ai_agent::Msg),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
     let apps = scan_applications();
-    let mode = Mode::Search(SearchState::new(&apps));
+    let launcher = AppLauncher::new(&apps);
+    let ai_agent = AIAgent::new();
     let state = Trebuchet {
         apps,
-        query: String::new(),
         config: Config::load(),
-        shake_state: ShakeState::default(),
-        mode,
+        active: ActiveComponent::Launcher,
+        launcher,
+        ai_agent,
     };
     (state, Task::none())
 }
@@ -81,98 +76,125 @@ pub fn namespace() -> String {
     "trebuchet".into()
 }
 
-// ── Mode sync ─────────────────────────────────────────────────────────────────
+// ── Event application ─────────────────────────────────────────────────────────
 
-fn sync_mode(state: &mut Trebuchet) {
-    let should_be_ai = state.query.starts_with("/ai");
-    match (&state.mode, should_be_ai) {
-        (Mode::Search(_), true) => {
-            state.mode = Mode::Ai(AiState::new());
+fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
+    match event {
+        ComponentEvent::Handled => {}
+        ComponentEvent::Exit => std::process::exit(0),
+        ComponentEvent::CommandInvoked(SlashCommand::Ai, args) => {
+            state.active = ActiveComponent::Ai;
+            state.ai_agent.reset(args);
         }
-        (Mode::Ai(_), false) => {
-            let mut search = SearchState::new(&state.apps);
-            search.apply_filter(&state.apps, &state.query);
-            state.mode = Mode::Search(search);
+        ComponentEvent::CommandInvoked(SlashCommand::App, _) => {
+            state.active = ActiveComponent::Launcher;
+            let apps = state.apps.clone();
+            state.launcher.reset(&apps);
         }
-        _ => {}
+        ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
     }
+}
+
+// ── Dispatch helpers ──────────────────────────────────────────────────────────
+
+fn dispatch_input(
+    state: &mut Trebuchet,
+    f_launcher: impl FnOnce(&mut AppLauncher, &[AppEntry], &Config) -> (Task<app_launcher::Msg>, ComponentEvent),
+    f_ai: impl FnOnce(&mut AIAgent, &[AppEntry], &Config) -> (Task<ai_agent::Msg>, ComponentEvent),
+) -> Task<Message> {
+    let (task, event) = match state.active {
+        ActiveComponent::Launcher => {
+            let (t, e) = f_launcher(&mut state.launcher, &state.apps, &state.config);
+            (t.map(Message::Launcher), e)
+        }
+        ActiveComponent::Ai => {
+            let (t, e) = f_ai(&mut state.ai_agent, &state.apps, &state.config);
+            (t.map(Message::Ai), e)
+        }
+    };
+    apply_event(state, event);
+    task
+}
+
+fn dispatch_nav(state: &mut Trebuchet, dir: NavDirection) {
+    let event = match state.active {
+        ActiveComponent::Launcher => state.launcher.handle_nav(dir, &state.config),
+        ActiveComponent::Ai => state.ai_agent.handle_nav(dir, &state.config),
+    };
+    apply_event(state, event);
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     match msg {
-        Message::SearchChanged(query) => {
-            state.query = query;
-            sync_mode(state);
-            if let Mode::Search(ref mut search) = state.mode {
-                search.apply_filter(&state.apps, &state.query);
-            }
-        }
-        Message::SearchAppend(c) => {
-            state.query.push_str(&c);
-            sync_mode(state);
-            if let Mode::Search(ref mut search) = state.mode {
-                search.apply_filter(&state.apps, &state.query);
-            }
-        }
-        Message::SearchBackspace => {
-            state.query.pop();
-            sync_mode(state);
-            if let Mode::Search(ref mut search) = state.mode {
-                search.apply_filter(&state.apps, &state.query);
-            }
-        }
         Message::Close => std::process::exit(0),
-        Message::KeyPressed(key) => match &key {
-            Key::Named(Named::Escape) => match &state.mode {
-                Mode::Ai(_) => {
-                    state.query.clear();
-                    state.mode = Mode::Search(SearchState::new(&state.apps));
-                }
-                Mode::Search(_) => std::process::exit(0),
-            },
-            Key::Named(Named::PageDown) => {
-                if let Mode::Search(ref mut search) = state.mode {
-                    let _ = search.update(Message::PageNext, &state.apps, &state.config);
-                }
-            }
-            Key::Named(Named::PageUp) => {
-                if let Mode::Search(ref mut search) = state.mode {
-                    let _ = search.update(Message::PagePrev, &state.apps, &state.config);
-                }
-            }
-            _ => {}
-        },
-        Message::AiSubmit => {
-            let is_ai = matches!(state.mode, Mode::Ai(_));
-            if is_ai {
-                let prompt = state.query.trim_start_matches("/ai").trim().to_string();
-                if prompt.is_empty() {
-                    state.shake_state = ShakeState { active: true, tick: 0 };
-                    return Task::none();
-                }
-                if let Mode::Ai(ref mut ai) = state.mode {
-                    return ai.start_query(prompt, &state.config);
-                }
-            } else if let Mode::Search(ref search) = state.mode {
-                let to_launch = search.selected
-                    .and_then(|sel| search.filtered.get(sel).copied());
-                if let Some(app_idx) = to_launch {
-                    if let Some(app) = state.apps.get(app_idx) {
-                        launch_app(&app.exec.clone(), app.terminal);
-                        std::process::exit(0);
-                    }
-                }
-            }
+
+        Message::Launcher(m) => {
+            return state.launcher.update(m, &state.apps, &state.config).map(Message::Launcher);
         }
-        Message::ShakeTick => {
-            state.shake_state.tick += 1;
-            if state.shake_state.tick >= 6 {
-                state.shake_state = ShakeState::default();
-            }
+        Message::Ai(m) => {
+            return state.ai_agent.update(m, &state.apps, &state.config).map(Message::Ai);
         }
-        msg => return state.mode.update(msg, &state.apps, &state.config),
+
+        Message::InputChar(c) => {
+            return dispatch_input(
+                state,
+                |l, apps, cfg| l.handle_char(c.clone(), apps, cfg),
+                |a, apps, cfg| a.handle_char(c.clone(), apps, cfg),
+            );
+        }
+        Message::InputBackspace => {
+            return dispatch_input(
+                state,
+                |l, apps, cfg| l.handle_backspace(apps, cfg),
+                |a, apps, cfg| a.handle_backspace(apps, cfg),
+            );
+        }
+        Message::Submit => {
+            return dispatch_input(
+                state,
+                |l, apps, cfg| l.handle_submit(apps, cfg),
+                |a, apps, cfg| a.handle_submit(apps, cfg),
+            );
+        }
+
+        Message::Escape => {
+            let event = match state.active {
+                ActiveComponent::Launcher => state.launcher.handle_escape(),
+                ActiveComponent::Ai => state.ai_agent.handle_escape(),
+            };
+            apply_event(state, event);
+        }
+
+        Message::NavLeft => dispatch_nav(state, NavDirection::Left),
+        Message::NavRight => dispatch_nav(state, NavDirection::Right),
+        Message::NavUp => dispatch_nav(state, NavDirection::Up),
+        Message::NavDown => dispatch_nav(state, NavDirection::Down),
+
+        Message::PageNext => {
+            let event = match state.active {
+                ActiveComponent::Launcher => state.launcher.handle_page(1, &state.config),
+                ActiveComponent::Ai => state.ai_agent.handle_page(1, &state.config),
+            };
+            apply_event(state, event);
+        }
+        Message::PagePrev => {
+            let event = match state.active {
+                ActiveComponent::Launcher => state.launcher.handle_page(-1, &state.config),
+                ActiveComponent::Ai => state.ai_agent.handle_page(-1, &state.config),
+            };
+            apply_event(state, event);
+        }
+        Message::GoToPage(p) => {
+            let event = match state.active {
+                ActiveComponent::Launcher => state.launcher.handle_go_to_page(p, &state.config),
+                ActiveComponent::Ai => state.ai_agent.handle_go_to_page(p, &state.config),
+            };
+            apply_event(state, event);
+        }
+        // Extra variants injected by #[to_layer_message] (layershell protocol messages).
+        _ => {}
     }
     Task::none()
 }
@@ -180,13 +202,14 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
 // ── View ──────────────────────────────────────────────────────────────────────
 
 pub fn view(state: &Trebuchet) -> Element<'_, Message> {
-    let body = state.mode.view(&state.apps, &state.config);
-
-    let content = column![search_bar(&state.query, &state.shake_state), body]
-        .spacing(16)
-        .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
-        .width(Length::Fill)
-        .height(Length::Fill);
+    let content = match state.active {
+        ActiveComponent::Launcher => {
+            state.launcher.view(&state.apps, &state.config).map(Message::Launcher)
+        }
+        ActiveComponent::Ai => {
+            state.ai_agent.view(&state.apps, &state.config).map(Message::Ai)
+        }
+    };
 
     container(content)
         .width(Length::Fill)
@@ -212,27 +235,27 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match event {
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => match &key {
-            Key::Named(Named::Escape)
-            | Key::Named(Named::PageDown)
-            | Key::Named(Named::PageUp) => Some(Message::KeyPressed(key)),
-            Key::Named(Named::Enter) => Some(Message::AiSubmit),
+            Key::Named(Named::Enter) => Some(Message::Submit),
+            Key::Named(Named::Escape) => Some(Message::Escape),
+            Key::Named(Named::PageDown) => Some(Message::PageNext),
+            Key::Named(Named::PageUp) => Some(Message::PagePrev),
             Key::Named(Named::ArrowRight) if status == Status::Ignored => {
-                Some(Message::SelectNext)
+                Some(Message::NavRight)
             }
             Key::Named(Named::ArrowLeft) if status == Status::Ignored => {
-                Some(Message::SelectPrev)
+                Some(Message::NavLeft)
             }
             Key::Named(Named::ArrowDown) if status == Status::Ignored => {
-                Some(Message::SelectDown)
+                Some(Message::NavDown)
             }
             Key::Named(Named::ArrowUp) if status == Status::Ignored => {
-                Some(Message::SelectUp)
+                Some(Message::NavUp)
             }
             Key::Named(Named::Backspace) if status == Status::Ignored => {
-                Some(Message::SearchBackspace)
+                Some(Message::InputBackspace)
             }
             Key::Named(Named::Space) if status == Status::Ignored => {
-                Some(Message::SearchAppend(" ".to_string()))
+                Some(Message::InputChar(" ".to_string()))
             }
             Key::Character(_)
                 if status == Status::Ignored
@@ -240,7 +263,7 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
                     && !modifiers.alt()
                     && !modifiers.logo() =>
             {
-                text.as_ref().map(|t| Message::SearchAppend(t.to_string()))
+                text.as_ref().map(|t| Message::InputChar(t.to_string()))
             }
             _ => None,
         },
@@ -256,12 +279,9 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
 
 pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
     let events = event::listen_with(on_event);
-
-    let shake = if state.shake_state.active {
-        time::every(Duration::from_millis(67)).map(|_| Message::ShakeTick)
-    } else {
-        Subscription::none()
+    let component = match state.active {
+        ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
+        ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
     };
-
-    Subscription::batch([events, state.mode.subscription(), shake])
+    Subscription::batch([events, component])
 }

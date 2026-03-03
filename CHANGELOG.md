@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.0] - 2026-03-03
 
 ### Added
 - AI response rendered as formatted markdown (headings, bold, inline code, code blocks, lists, links)
-- Clicking a link in the AI response opens it with `xdg-open`; copying still sends raw markdown to the clipboard
+- Clicking a link in the AI response opens it with `xdg-open`; copying sends raw markdown to clipboard
 - Search bar magnifying glass replaced with a matching SVG icon (same stroke style as the robot icon)
 - `/ai` inline AI assistant: type `/ai <question>` to query an AI provider without leaving the launcher
 - Multi-provider support: OpenAI, Anthropic, Gemini, and Ollama (local)
@@ -14,26 +14,33 @@ All notable changes to this project will be documented in this file.
 - "Copied to clipboard" feedback on copy (auto-dismisses after 2 s via `wl-copy`)
 - Animated loading indicator with trebuchet-themed verbs (Catapulting, Launching…)
 - Robot icon in search bar while in AI mode; shake animation on empty prompt submit
-- Escape in AI mode returns to the app grid (app stays open)
-- `src/modes/` architecture: each mode owns its state and message handling, making future modes easy to add
-  - `modes::search` — `SearchState` with filter, pagination, and selection logic
-  - `modes::ai` — `AiStatus` + `AiState` with full AI lifecycle (query, retry, copy, tick)
+- Escape in AI mode returns to the app grid; type `/app ` to do the same
 - `ai_provider`, `ai_api_key`, `ai_model`, `ai_base_url` config keys with per-provider documentation
 - Quoted config values are stripped automatically (e.g. `ai_provider = "anthropic"` works)
 - `install.sh`: interactive AI setup wizard (provider menu, model, API key, base URL)
 - `install.sh`: AI wizard is skipped when config is not freshly installed or overwritten
-- `Terminal=true` desktop entry support: apps that require a terminal are now launched inside an auto-detected terminal emulator (`$TERMINAL`, foot, kitty, alacritty, ghostty, wezterm, xterm)
+- `Terminal=true` desktop entry support: apps requiring a terminal are launched inside an auto-detected emulator (`$TERMINAL`, foot, kitty, alacritty, ghostty, wezterm, xterm)
 - `AppEntry::terminal` field parsed from desktop entry files
 - File-based configuration: `~/.config/trebuchet/trebuchet.conf` loaded at startup
-- `assets/trebuchet.conf` embedded in the binary as the authoritative default config; missing or invalid user keys fall back to it
+- `assets/trebuchet.conf` embedded in the binary as the authoritative default config
 - Config loading is layered: hardcoded Rust defaults → embedded conf → user conf
 - Unit tests for config parsing (missing keys, invalid values, unknown keys, whitespace, comments)
-- Updated README: configuration section, keyboard navigation, terminal app support
-- `install.sh`: deploy default config to `~/.config/trebuchet/trebuchet.conf` on install; prompt before overwriting an existing one
-- `install.sh`: `--uninstall` now removes `~/.config/trebuchet/` in addition to the binary and data files
-- `install.sh`: `--yes` / `-y` flag to assume yes for all prompts (non-interactive installs)
-- `install.sh`: prompt before updating existing icons; skip with `--yes`
+- Updated README: configuration section, keyboard navigation, terminal app support, AI assistant
+- `install.sh`: deploy default config on install; prompt before overwriting an existing one
+- `install.sh`: `--uninstall` removes `~/.config/trebuchet/` in addition to the binary and icons
+- `install.sh`: `--yes` / `-y` flag for non-interactive installs
 - `install.sh`: `confirm()` helper consolidates all interactive prompts
+
+### Changed
+- Component isolation refactor: `app.rs` is now a pure message router; each UI mode is a self-contained component implementing a `Component` trait
+  - `app_launcher.rs` — `AppLauncher` owns query, filter, pagination, selection, and shake state
+  - `ai_agent.rs` — `AIAgent` owns query, prompt, AI status, copy feedback, and shake state
+  - `command.rs` — `SlashCommand` + `ComponentEvent` for cross-component communication
+  - `component.rs` — `Component` trait and `NavDirection` enum
+  - `ui/search.rs` — `ShakeState` moved here; `search_bar` is now generic over message type
+  - `ui/grid.rs` — `app_grid` is now generic over message type via an `on_activate` callback
+  - `ui/ai_response.rs` — `ai_panel` is now generic over message type via callbacks
+- AI mode search bar no longer shows the `/ai ` prefix; only the question text is displayed
 
 ## [0.0.1] - 2026-03-02
 

@@ -3,8 +3,6 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length,
 };
 
-use crate::app::{Message, ShakeState};
-
 pub const SEARCH_ID: &str = "trebuchet_search";
 
 const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -25,16 +23,48 @@ const ROBOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
 
 const SHAKE_OFFSETS: [f32; 6] = [-8.0, 8.0, -5.0, 5.0, -2.0, 0.0];
 
-pub fn search_bar<'a>(query: &str, shake: &ShakeState) -> Element<'a, Message> {
-    let icon_bytes = if query.starts_with("/ai") { ROBOT_SVG } else { SEARCH_SVG };
-    let icon: Element<'a, Message> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShakeState {
+    pub active: bool,
+    pub tick: u8,
+}
+
+impl ShakeState {
+    pub fn trigger() -> Self {
+        ShakeState { active: true, tick: 0 }
+    }
+
+    pub fn advance(&mut self) {
+        self.tick += 1;
+        if self.tick >= 6 {
+            *self = ShakeState::default();
+        }
+    }
+}
+
+pub enum SearchIcon {
+    Search,
+    Robot,
+}
+
+pub fn search_bar<'a, Msg: Clone + 'a>(
+    query: &str,
+    shake: &ShakeState,
+    icon: SearchIcon,
+    on_input: impl Fn(String) -> Msg + 'a,
+) -> Element<'a, Msg> {
+    let icon_bytes = match icon {
+        SearchIcon::Search => SEARCH_SVG,
+        SearchIcon::Robot => ROBOT_SVG,
+    };
+    let icon_widget: Element<'a, Msg> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(20)
         .height(20)
         .into();
 
     let input = text_input("Search apps...", query)
         .id(Id::new(SEARCH_ID))
-        .on_input(Message::SearchChanged)
+        .on_input(on_input)
         .padding(0)
         .size(20)
         .width(Length::Fill)
@@ -47,7 +77,7 @@ pub fn search_bar<'a>(query: &str, shake: &ShakeState) -> Element<'a, Message> {
             selection: Color { r: 0.4, g: 0.5, b: 0.9, a: 0.45 },
         });
 
-    let inner = row![icon, input]
+    let inner = row![icon_widget, input]
         .spacing(12)
         .align_y(Alignment::Center);
 
