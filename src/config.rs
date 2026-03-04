@@ -9,6 +9,13 @@ pub enum AiProvider {
     Ollama,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomCommand {
+    pub prefix: String,
+    pub command: String,
+    pub display_result: bool,
+}
+
 pub struct Config {
     pub columns: usize,
     pub rows: usize,
@@ -17,6 +24,7 @@ pub struct Config {
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
     pub ai_base_url: Option<String>,
+    pub commands: Vec<CustomCommand>,
 }
 
 impl Config {
@@ -38,17 +46,49 @@ impl Config {
     }
 
     /// Apply key=value pairs from `content` onto `base`, returning the result.
-    /// Unknown keys and unparseable values are silently ignored, preserving
-    /// whatever `base` already has for those fields.
+    /// `[[command]]` blocks are accumulated into `base.commands`.
+    /// Unknown keys and unparseable values are silently ignored.
     fn parse(mut base: Self, content: &str) -> Self {
+        // State for the [[command]] block currently being assembled.
+        let mut cur_prefix = String::new();
+        let mut cur_command = String::new();
+        let mut cur_display = false;
+        let mut in_cmd_block = false;
+
+        let finalize = |base: &mut Config, prefix: &mut String, command: &mut String, display: &mut bool| {
+            if !prefix.is_empty() && !command.is_empty() {
+                base.commands.push(CustomCommand {
+                    prefix: std::mem::take(prefix),
+                    command: std::mem::take(command),
+                    display_result: std::mem::take(display),
+                });
+            }
+        };
+
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if let Some((key, val)) = line.split_once('=') {
-                let val = val.trim().trim_matches('"');
-                match key.trim() {
+            if line == "[[command]]" {
+                if in_cmd_block {
+                    finalize(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
+                }
+                in_cmd_block = true;
+                continue;
+            }
+            let Some((key, val)) = line.split_once('=') else { continue };
+            let key = key.trim();
+            let val = val.trim().trim_matches('"');
+
+            let handled_as_cmd_key = in_cmd_block && match key {
+                "prefix"         => { cur_prefix  = val.to_string(); true }
+                "command"        => { cur_command  = val.to_string(); true }
+                "display_result" => { cur_display  = val == "true";  true }
+                _ => false,
+            };
+            if !handled_as_cmd_key {
+                match key {
                     "columns"   => { if let Ok(v) = val.parse() { base.columns   = v; } }
                     "rows"      => { if let Ok(v) = val.parse() { base.rows      = v; } }
                     "icon_size" => { if let Ok(v) = val.parse() { base.icon_size = v; } }
@@ -65,6 +105,11 @@ impl Config {
                 }
             }
         }
+
+        if in_cmd_block {
+            finalize(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
+        }
+
         base
     }
 }
@@ -79,6 +124,7 @@ impl Default for Config {
             ai_api_key: None,
             ai_model: None,
             ai_base_url: None,
+            commands: Vec::new(),
         }
     }
 }
@@ -148,5 +194,61 @@ mod tests {
         assert_eq!(cfg.columns, 5);
         assert_eq!(cfg.rows, 5);      // from embedded default
         assert_eq!(cfg.icon_size, 96); // from embedded default
+    }
+
+    // ── [[command]] blocks ────────────────────────────────────────────────────
+
+    #[test]
+    fn command_block_parsed() {
+        let cfg = Config::parse(defaults(), "[[command]]\nprefix = /hi\ncommand = echo hi\n");
+        assert_eq!(cfg.commands.len(), 1);
+        assert_eq!(cfg.commands[0].prefix, "/hi");
+        assert_eq!(cfg.commands[0].command, "echo hi");
+        assert!(!cfg.commands[0].display_result);
+    }
+
+    #[test]
+    fn command_display_result_true() {
+        let cfg = Config::parse(defaults(), "[[command]]\nprefix = /up\ncommand = uptime\ndisplay_result = true\n");
+        assert!(cfg.commands[0].display_result);
+    }
+
+    #[test]
+    fn multiple_command_blocks() {
+        let content = "[[command]]\nprefix = /a\ncommand = echo a\n\n[[command]]\nprefix = /b\ncommand = echo b\ndisplay_result = true\n";
+        let cfg = Config::parse(defaults(), content);
+        assert_eq!(cfg.commands.len(), 2);
+        assert_eq!(cfg.commands[0].prefix, "/a");
+        assert!(!cfg.commands[0].display_result);
+        assert_eq!(cfg.commands[1].prefix, "/b");
+        assert!(cfg.commands[1].display_result);
+    }
+
+    #[test]
+    fn command_block_without_prefix_skipped() {
+        let cfg = Config::parse(defaults(), "[[command]]\ncommand = echo hi\n");
+        assert_eq!(cfg.commands.len(), 0);
+    }
+
+    #[test]
+    fn command_block_without_command_skipped() {
+        let cfg = Config::parse(defaults(), "[[command]]\nprefix = /hi\n");
+        assert_eq!(cfg.commands.len(), 0);
+    }
+
+    #[test]
+    fn command_blocks_accumulate_across_parse_layers() {
+        let base = Config::parse(defaults(), "[[command]]\nprefix = /a\ncommand = echo a\n");
+        let cfg  = Config::parse(base, "[[command]]\nprefix = /b\ncommand = echo b\n");
+        assert_eq!(cfg.commands.len(), 2);
+    }
+
+    #[test]
+    fn scalar_keys_before_and_after_command_block() {
+        let content = "columns = 3\n\n[[command]]\nprefix = /hi\ncommand = echo hi\n\nrows = 2\n";
+        let cfg = Config::parse(defaults(), content);
+        assert_eq!(cfg.columns, 3);
+        assert_eq!(cfg.rows, 2);
+        assert_eq!(cfg.commands.len(), 1);
     }
 }

@@ -7,10 +7,11 @@ use iced::{
 };
 use iced_layershell::to_layer_message;
 
-use crate::ai_agent::{self, AIAgent};
-use crate::app_launcher::{self, AppLauncher};
-use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::Component;
+use crate::components::ai_agent::{self, AIAgent};
+use crate::components::app_launcher::{self, AppLauncher};
+use crate::components::command::{ComponentEvent, SlashCommand};
+use crate::components::command_result::{self, CommandResult};
+use crate::components::component::Component;
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
 
@@ -20,6 +21,7 @@ use crate::launcher::{scan_applications, AppEntry};
 pub enum ActiveComponent {
     Launcher,
     Ai,
+    CommandResult,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -30,6 +32,7 @@ pub struct Trebuchet {
     pub active: ActiveComponent,
     pub launcher: AppLauncher,
     pub ai_agent: AIAgent,
+    pub command_result: CommandResult,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -41,6 +44,7 @@ pub enum Message {
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
+    CommandResult(command_result::Msg),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -49,12 +53,14 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
     let apps = scan_applications();
     let launcher = AppLauncher::new(&apps);
     let ai_agent = AIAgent::new();
+    let command_result = CommandResult::new();
     let state = Trebuchet {
         apps,
         config: Config::load(),
         active: ActiveComponent::Launcher,
         launcher,
         ai_agent,
+        command_result,
     };
     (state, Task::none())
 }
@@ -79,6 +85,10 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             state.launcher.reset(&apps);
         }
         ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
+        ComponentEvent::ShowCommandResult { prefix, output } => {
+            state.active = ActiveComponent::CommandResult;
+            state.command_result.show(prefix, output);
+        }
     }
 }
 
@@ -89,10 +99,19 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         Message::Close => std::process::exit(0),
 
         Message::Launcher(m) => {
-            return state.launcher.update(m, &state.apps, &state.config).map(Message::Launcher);
+            let (task, evt) = state.launcher.update(m, &state.apps, &state.config);
+            apply_event(state, evt);
+            return task.map(Message::Launcher);
         }
         Message::Ai(m) => {
-            return state.ai_agent.update(m, &state.apps, &state.config).map(Message::Ai);
+            let (task, evt) = state.ai_agent.update(m, &state.apps, &state.config);
+            apply_event(state, evt);
+            return task.map(Message::Ai);
+        }
+        Message::CommandResult(m) => {
+            let (task, evt) = state.command_result.update(m, &state.apps, &state.config);
+            apply_event(state, evt);
+            return task.map(Message::CommandResult);
         }
 
         Message::IcedEvent(event, status) => {
@@ -104,6 +123,10 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 ActiveComponent::Ai => {
                     let (t, e) = state.ai_agent.handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Ai), e)
+                }
+                ActiveComponent::CommandResult => {
+                    let (t, e) = state.command_result.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::CommandResult), e)
                 }
             };
             apply_event(state, evt);
@@ -125,6 +148,9 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         }
         ActiveComponent::Ai => {
             state.ai_agent.view(&state.apps, &state.config).map(Message::Ai)
+        }
+        ActiveComponent::CommandResult => {
+            state.command_result.view(&state.apps, &state.config).map(Message::CommandResult)
         }
     };
 
@@ -167,6 +193,7 @@ pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
     let component = match state.active {
         ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
         ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
+        ActiveComponent::CommandResult => state.command_result.subscription().map(Message::CommandResult),
     };
     Subscription::batch([events, component])
 }

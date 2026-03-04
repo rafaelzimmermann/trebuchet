@@ -14,6 +14,7 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - Escape to close
 - Launches on the active screen
 - Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model without leaving the launcher
+- Custom commands — define shell shortcuts in config (e.g. `/shutdown`, `/uptime`) with optional output display
 
 ![trebuchet screenshot](assets/trebuchet-fullview.png)
 
@@ -93,7 +94,10 @@ cargo run --release
 | Arrow keys | Move selection through the grid |
 | Enter | Launch selected application |
 | Click | Launch application |
-| Escape | Close launcher |
+| `/ai <question>` + Enter | Switch to AI assistant |
+| `/app` + Enter | Return to app grid from AI mode |
+| `/<prefix>` + Enter | Run a custom command |
+| Escape | Close launcher (or return to app grid from AI mode) |
 
 ## AI assistant
 
@@ -134,6 +138,38 @@ ai_provider = ollama
 ai_base_url = http://localhost:11434
 ai_model    = llama3.2
 ```
+
+## Custom commands
+
+Define shell shortcuts that trigger by typing a prefix and pressing Enter.
+
+```ini
+# ~/.config/trebuchet/trebuchet.conf
+
+[[command]]
+prefix  = /shutdown
+command = shutdown -h now
+
+[[command]]
+prefix  = /reboot
+command = reboot
+```
+
+Set `display_result = true` to capture stdout and show it in the response panel instead of closing the launcher:
+
+```ini
+[[command]]
+prefix         = /uptime
+command        = uptime -p
+display_result = true
+
+[[command]]
+prefix         = /ip
+command        = ip -br addr show
+display_result = true
+```
+
+The `command` is executed with `sh -c`, so pipes, substitutions, and any shell built-in work. Multiple `[[command]]` blocks can be defined; they accumulate across config layers.
 
 ## Configuration
 

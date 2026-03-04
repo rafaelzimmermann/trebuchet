@@ -3,7 +3,9 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length,
 };
 
-pub const SEARCH_ID: &str = "trebuchet_search";
+const SEARCH_ID_LAUNCHER:  &str = "trebuchet_search_launcher";
+const SEARCH_ID_AI:        &str = "trebuchet_search_ai";
+const SEARCH_ID_TERMINAL:  &str = "trebuchet_search_terminal";
 
 const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
   fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -19,6 +21,13 @@ const ROBOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
   <circle cx="9" cy="11" r="1.2" fill="white"/>
   <circle cx="15" cy="11" r="1.2" fill="white"/>
   <line x1="9" y1="14" x2="15" y2="14"/>
+</svg>"#;
+
+const TERMINAL_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="2" y="3" width="20" height="16" rx="2"/>
+  <polyline points="6,8 10,12 6,16"/>
+  <line x1="13" y1="16" x2="19" y2="16"/>
 </svg>"#;
 
 const SHAKE_OFFSETS: [f32; 6] = [-8.0, 8.0, -5.0, 5.0, -2.0, 0.0];
@@ -45,6 +54,7 @@ impl ShakeState {
 pub enum SearchIcon {
     Search,
     Robot,
+    Terminal,
 }
 
 pub fn search_bar<'a, Msg: Clone + 'a>(
@@ -53,9 +63,10 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
     icon: SearchIcon,
     on_input: impl Fn(String) -> Msg + 'a,
 ) -> Element<'a, Msg> {
-    let icon_bytes = match icon {
-        SearchIcon::Search => SEARCH_SVG,
-        SearchIcon::Robot => ROBOT_SVG,
+    let (icon_bytes, search_id) = match icon {
+        SearchIcon::Search   => (SEARCH_SVG,   SEARCH_ID_LAUNCHER),
+        SearchIcon::Robot    => (ROBOT_SVG,    SEARCH_ID_AI),
+        SearchIcon::Terminal => (TERMINAL_SVG, SEARCH_ID_TERMINAL),
     };
     let icon_widget: Element<'a, Msg> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(20)
@@ -63,7 +74,7 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         .into();
 
     let input = text_input("Search apps...", query)
-        .id(Id::new(SEARCH_ID))
+        .id(Id::new(search_id))
         .on_input(on_input)
         .padding(0)
         .size(20)

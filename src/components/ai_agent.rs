@@ -7,9 +7,9 @@ use iced::{
 };
 use std::time::Duration;
 
-use crate::ai_client::{self, AiRequest};
-use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::Component;
+use super::ai_client::{self, AiRequest};
+use super::command::{ComponentEvent, SlashCommand};
+use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
 use crate::ui::{ai_panel, search_bar, SearchIcon, ShakeState};
@@ -153,7 +153,7 @@ impl Component for AIAgent {
         }
     }
 
-    fn update(&mut self, msg: Msg, _apps: &[AppEntry], config: &Config) -> Task<Msg> {
+    fn update(&mut self, msg: Msg, _apps: &[AppEntry], config: &Config) -> (Task<Msg>, ComponentEvent) {
         match msg {
             Msg::QueryChanged(s) => {
                 self.query = s;
@@ -173,17 +173,20 @@ impl Component for AIAgent {
             Msg::Retry => {
                 let prompt = self.prompt.clone();
                 if prompt.is_empty() {
-                    return Task::none();
+                    return (Task::none(), ComponentEvent::Handled);
                 }
-                return self.start_query(prompt, config);
+                return (self.start_query(prompt, config), ComponentEvent::Handled);
             }
             Msg::CopyResponse => {
                 if let AiStatus::Done(text) = &self.status {
                     let _ = std::process::Command::new("wl-copy").arg(text).spawn();
                     self.copy_feedback = true;
-                    return Task::perform(
-                        async { tokio::time::sleep(Duration::from_secs(2)).await },
-                        |_| Msg::Copied,
+                    return (
+                        Task::perform(
+                            async { tokio::time::sleep(Duration::from_secs(2)).await },
+                            |_| Msg::Copied,
+                        ),
+                        ComponentEvent::Handled,
                     );
                 }
             }
@@ -202,7 +205,7 @@ impl Component for AIAgent {
                 let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
             }
         }
-        Task::none()
+        (Task::none(), ComponentEvent::Handled)
     }
 
     fn view<'a>(&'a self, _apps: &'a [AppEntry], _config: &'a Config) -> Element<'a, Msg> {

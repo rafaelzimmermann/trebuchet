@@ -11,6 +11,7 @@
 #   --no-icons    skip fetching high-resolution icons
 #   --uninstall   remove installed files
 #   --yes         assume yes for all prompts (non-interactive)
+#   --no          assume no for all prompts (non-interactive)
 #
 # When run from the project root (where Cargo.toml lives), the local source is used.
 # Otherwise the repository is cloned automatically.
@@ -23,6 +24,7 @@ SYSTEM=true
 FETCH_ICONS=true
 UNINSTALL=false
 YES=false
+NO=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -30,14 +32,19 @@ for arg in "$@"; do
         --no-icons)  FETCH_ICONS=false ;;
         --uninstall) UNINSTALL=true ;;
         --yes|-y)    YES=true ;;
+        --no|-n)     NO=true ;;
         # Legacy flags (now the default — kept for compatibility)
         --system)    SYSTEM=true ;;
         --icons)     FETCH_ICONS=true ;;
         --help|-h)
-            sed -n '2,15p' "$0" | sed 's/^# \?//'
+            sed -n '2,16p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
-        *) echo "Unknown option: $arg"; exit 1 ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Run with --help to see available options."
+            exit 1
+            ;;
     esac
 done
 
@@ -83,9 +90,10 @@ priv_tee() { $PRIV tee "$@" >/dev/null; }
 priv_rm() { $PRIV rm "$@"; }
 
 # confirm <prompt>  — returns 0 (yes) or 1 (no).
-# With --yes, always returns 0 without prompting.
+# With --yes, always returns 0; with --no, always returns 1 without prompting.
 confirm() {
     if $YES; then return 0; fi
+    if $NO;  then return 1; fi
     local reply
     read -r -n 1 -p "$1 [y/N] " reply
     echo ""
@@ -245,7 +253,7 @@ setup_ai() {
     echo "Type /ai <question> in trebuchet to try it."
 }
 
-if [[ -t 0 ]] && ! $YES && $CONFIG_FRESH; then
+if [[ -t 0 ]] && ! $YES && ! $NO && $CONFIG_FRESH; then
     echo ""
     if confirm "Would you like to set up the AI assistant?"; then
         setup_ai

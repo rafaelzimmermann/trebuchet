@@ -4,13 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-04
+
 ### Added
-- Bare slash command + Enter switches mode: `/ai` ↵ enters AI mode, `/app` ↵ returns to launcher (previously a trailing space was required)
+- Custom commands via `[[command]]` blocks in `trebuchet.conf`: type a prefix and press Enter (or space) to run a shell command; set `display_result = true` to capture stdout and display it in a dedicated terminal-style panel
+- Dedicated command-result view: terminal icon in the search bar, monospace output with green prompt line, copy button, input cleared after each run so the next command can be typed immediately
+- `/ai ` (trailing space) now immediately switches to AI mode without requiring Enter; same for custom command prefixes
+- `install.sh`: `--no` / `-n` flag — assumes "no" to all interactive prompts (opposite of `--yes`)
 
 ### Changed
-- `Component` trait reduced to a single `handle_event(event, status, apps, config)` method; components parse raw iced events directly instead of receiving pre-translated message variants
-- `app::Message` reduced from 14 variants to 4 (`Close`, `IcedEvent`, `Launcher`, `Ai`); `on_event` is now a trivial pass-through
-- Removed `NavDirection` enum and all `dispatch_input`/`dispatch_nav` helpers from `app.rs`
+- Component isolation completed: all mode logic moved to `src/components/`; `app.rs` is a pure router with no mode-specific knowledge
+- `Component::update()` now returns `(Task<Msg>, ComponentEvent)` so widget-driven input (e.g. `text_input` on_input) can trigger cross-component transitions without going through `handle_event`
+- Each mode's search bar uses a distinct widget ID; switching modes no longer carries over text from the previous input field
+- `Component` trait simplified: `handle_event` replaces seven individual handler methods
 
 ## [0.1.0] - 2026-03-03
 

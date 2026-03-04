@@ -9,8 +9,8 @@ use iced::{
 };
 use std::time::Duration;
 
-use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::Component;
+use super::command::{ComponentEvent, SlashCommand};
+use super::component::Component;
 use crate::config::Config;
 use crate::launcher::{launch_app, AppEntry};
 use crate::ui::{app_grid, search_bar, SearchIcon, ShakeState};
@@ -88,7 +88,7 @@ impl AppLauncher {
         &mut self,
         c: String,
         apps: &[AppEntry],
-        _config: &Config,
+        config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
         self.query.push_str(&c);
 
@@ -100,7 +100,29 @@ impl AppLauncher {
                 SlashCommand::App => {
                     return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
                 }
-                SlashCommand::Unknown(_) => {
+                SlashCommand::Unknown(ref name) => {
+                    let prefix = format!("/{}", name);
+                    if let Some(cmd) = config.commands.iter().find(|c| c.prefix == prefix) {
+                        let shell_cmd = cmd.command.clone();
+                        if cmd.display_result {
+                            let output = match std::process::Command::new("sh")
+                                .args(["-c", &shell_cmd])
+                                .output()
+                            {
+                                Ok(o) => {
+                                    let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                    if out.is_empty() { "(no output)".to_string() } else { out }
+                                }
+                                Err(e) => format!("Error: {e}"),
+                            };
+                            return (Task::none(), ComponentEvent::ShowCommandResult { prefix, output });
+                        } else {
+                            let _ = std::process::Command::new("sh")
+                                .args(["-c", &shell_cmd])
+                                .spawn();
+                            return (Task::none(), ComponentEvent::Exit);
+                        }
+                    }
                     self.shake = ShakeState::trigger();
                     self.query.clear();
                     self.apply_filter(apps, "");
@@ -173,9 +195,30 @@ impl Component for AppLauncher {
         };
         match key {
             Key::Named(Named::Enter) => {
-                // A bare slash command (e.g. `/ai` without trailing space) followed by
-                // Enter should switch modes, same as typing the command with a space.
-                if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", self.query.trim())) {
+                // 1. Custom commands — exact prefix match takes priority.
+                let trimmed = self.query.trim().to_string();
+                if let Some(cmd) = config.commands.iter().find(|c| c.prefix == trimmed) {
+                    let shell_cmd = cmd.command.clone();
+                    if cmd.display_result {
+                        let output = match std::process::Command::new("sh")
+                            .args(["-c", &shell_cmd])
+                            .output()
+                        {
+                            Ok(o) => {
+                                let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                if out.is_empty() { "(no output)".to_string() } else { out }
+                            }
+                            Err(e) => format!("Error: {e}"),
+                        };
+                        return (Task::none(), ComponentEvent::ShowCommandResult { prefix: trimmed.clone(), output });
+                    } else {
+                        let _ = std::process::Command::new("sh").args(["-c", &shell_cmd]).spawn();
+                        return (Task::none(), ComponentEvent::Exit);
+                    }
+                }
+
+                // 2. Bare slash command (e.g. `/ai` without trailing space) switches mode.
+                if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
                     return match cmd {
                         SlashCommand::Ai => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args)),
                         SlashCommand::App => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args)),
@@ -187,6 +230,8 @@ impl Component for AppLauncher {
                         }
                     };
                 }
+
+                // 3. Launch the selected app.
                 self.handle_submit(apps, config)
             }
             Key::Named(Named::Escape) => (Task::none(), ComponentEvent::Exit),
@@ -230,9 +275,49 @@ impl Component for AppLauncher {
         }
     }
 
-    fn update(&mut self, msg: Msg, apps: &[AppEntry], config: &Config) -> Task<Msg> {
+    fn update(&mut self, msg: Msg, apps: &[AppEntry], config: &Config) -> (Task<Msg>, ComponentEvent) {
         match msg {
             Msg::QueryChanged(s) => {
+                if let Some((cmd, args)) = SlashCommand::detect(&s) {
+                    match cmd {
+                        SlashCommand::Ai => {
+                            self.query = String::new();
+                            return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args));
+                        }
+                        SlashCommand::App => {
+                            self.query = String::new();
+                            return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
+                        }
+                        SlashCommand::Unknown(ref name) => {
+                            let prefix = format!("/{}", name);
+                            if let Some(cmd) = config.commands.iter().find(|c| c.prefix == prefix) {
+                                let shell_cmd = cmd.command.clone();
+                                if cmd.display_result {
+                                    let output = match std::process::Command::new("sh")
+                                        .args(["-c", &shell_cmd])
+                                        .output()
+                                    {
+                                        Ok(o) => {
+                                            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                            if out.is_empty() { "(no output)".to_string() } else { out }
+                                        }
+                                        Err(e) => format!("Error: {e}"),
+                                    };
+                                    return (Task::none(), ComponentEvent::ShowCommandResult { prefix, output });
+                                } else {
+                                    let _ = std::process::Command::new("sh")
+                                        .args(["-c", &shell_cmd])
+                                        .spawn();
+                                    return (Task::none(), ComponentEvent::Exit);
+                                }
+                            }
+                            self.shake = ShakeState::trigger();
+                            self.query = String::new();
+                            self.apply_filter(apps, "");
+                            return (Task::none(), ComponentEvent::Handled);
+                        }
+                    }
+                }
                 self.apply_filter(apps, &s);
                 self.query = s;
             }
@@ -251,7 +336,7 @@ impl Component for AppLauncher {
                 self.shake.advance();
             }
         }
-        Task::none()
+        (Task::none(), ComponentEvent::Handled)
     }
 
     fn view<'a>(&'a self, apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
