@@ -4,6 +4,9 @@ An application launcher for Hyprland/Wayland.
 
 Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https://github.com/waycrate/exwlseat).
 
+https://github.com/user-attachments/assets/3a6caffb-aa08-4783-8f2a-d0f1bb18a015
+
+
 ## Features
 
 - Screen overlay using the Wayland layer-shell protocol
@@ -16,7 +19,6 @@ Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https:/
 - Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model without leaving the launcher
 - Custom commands — define shell shortcuts in config (e.g. `/shutdown`, `/uptime`) with optional output display
 
-![trebuchet screenshot](assets/trebuchet-fullview.png)
 
 ## Requirements
 
