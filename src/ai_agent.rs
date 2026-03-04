@@ -1,9 +1,15 @@
-use iced::{widget::markdown, time, Element, Subscription, Task};
+use iced::{
+    event::Status,
+    keyboard::{self, key::Named, Key},
+    widget::markdown,
+    time,
+    Element, Event, Subscription, Task,
+};
 use std::time::Duration;
 
 use crate::ai_client::{self, AiRequest};
 use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::{Component, NavDirection};
+use crate::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
 use crate::ui::{ai_panel, search_bar, SearchIcon, ShakeState};
@@ -76,38 +82,21 @@ impl AIAgent {
     }
 }
 
-impl Component for AIAgent {
-    type Msg = Msg;
-
-    fn handle_char(
-        &mut self,
-        c: String,
-        _apps: &[AppEntry],
-        _config: &Config,
-    ) -> (Task<Msg>, ComponentEvent) {
+impl AIAgent {
+    fn do_char(&mut self, c: String) -> (Task<Msg>, ComponentEvent) {
         self.query.push_str(&c);
-
         if let Some((SlashCommand::App, args)) = SlashCommand::detect(&self.query) {
             return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
         }
-
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn handle_backspace(
-        &mut self,
-        _apps: &[AppEntry],
-        _config: &Config,
-    ) -> (Task<Msg>, ComponentEvent) {
+    fn do_backspace(&mut self) -> (Task<Msg>, ComponentEvent) {
         self.query.pop();
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn handle_submit(
-        &mut self,
-        _apps: &[AppEntry],
-        config: &Config,
-    ) -> (Task<Msg>, ComponentEvent) {
+    fn do_submit(&mut self, config: &Config) -> (Task<Msg>, ComponentEvent) {
         let prompt = self.query.trim().to_string();
         if prompt.is_empty() {
             self.shake = ShakeState::trigger();
@@ -116,22 +105,46 @@ impl Component for AIAgent {
         let task = self.start_query(prompt, config);
         (task, ComponentEvent::Handled)
     }
+}
 
-    fn handle_escape(&mut self) -> ComponentEvent {
-        self.query.clear();
-        ComponentEvent::CommandInvoked(SlashCommand::App, String::new())
-    }
+impl Component for AIAgent {
+    type Msg = Msg;
 
-    fn handle_nav(&mut self, _dir: NavDirection, _config: &Config) -> ComponentEvent {
-        ComponentEvent::Handled
-    }
-
-    fn handle_page(&mut self, _delta: i32, _config: &Config) -> ComponentEvent {
-        ComponentEvent::Handled
-    }
-
-    fn handle_go_to_page(&mut self, _p: usize, _config: &Config) -> ComponentEvent {
-        ComponentEvent::Handled
+    fn handle_event(
+        &mut self,
+        event: &Event,
+        status: Status,
+        _apps: &[AppEntry],
+        config: &Config,
+    ) -> (Task<Msg>, ComponentEvent) {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        else {
+            return (Task::none(), ComponentEvent::Handled);
+        };
+        match key {
+            Key::Named(Named::Enter) => self.do_submit(config),
+            Key::Named(Named::Escape) => {
+                self.query.clear();
+                (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, String::new()))
+            }
+            Key::Named(Named::Backspace) if status == Status::Ignored => self.do_backspace(),
+            Key::Named(Named::Space) if status == Status::Ignored => {
+                self.do_char(" ".to_string())
+            }
+            Key::Character(_)
+                if status == Status::Ignored
+                    && !modifiers.control()
+                    && !modifiers.alt()
+                    && !modifiers.logo() =>
+            {
+                if let Some(t) = text.as_ref() {
+                    self.do_char(t.to_string())
+                } else {
+                    (Task::none(), ComponentEvent::Handled)
+                }
+            }
+            _ => (Task::none(), ComponentEvent::Handled),
+        }
     }
 
     fn update(&mut self, msg: Msg, _apps: &[AppEntry], config: &Config) -> Task<Msg> {

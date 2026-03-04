@@ -1,17 +1,16 @@
 use iced::{
     event,
-    keyboard::{self, key::Named, Key},
+    event::Status,
     mouse,
     widget::container,
     Background, Border, Color, Element, Event, Length, Subscription, Task,
 };
-use iced::event::Status;
 use iced_layershell::to_layer_message;
 
 use crate::ai_agent::{self, AIAgent};
 use crate::app_launcher::{self, AppLauncher};
 use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::{Component, NavDirection};
+use crate::component::Component;
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
 
@@ -38,20 +37,8 @@ pub struct Trebuchet {
 #[to_layer_message]
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Raw input events from on_event
-    InputChar(String),
-    InputBackspace,
-    Submit,
-    Escape,
-    NavLeft,
-    NavRight,
-    NavUp,
-    NavDown,
-    PageNext,
-    PagePrev,
-    GoToPage(usize),
     Close,
-    // Component message wrappers
+    IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
 }
@@ -95,35 +82,6 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
     }
 }
 
-// ── Dispatch helpers ──────────────────────────────────────────────────────────
-
-fn dispatch_input(
-    state: &mut Trebuchet,
-    f_launcher: impl FnOnce(&mut AppLauncher, &[AppEntry], &Config) -> (Task<app_launcher::Msg>, ComponentEvent),
-    f_ai: impl FnOnce(&mut AIAgent, &[AppEntry], &Config) -> (Task<ai_agent::Msg>, ComponentEvent),
-) -> Task<Message> {
-    let (task, event) = match state.active {
-        ActiveComponent::Launcher => {
-            let (t, e) = f_launcher(&mut state.launcher, &state.apps, &state.config);
-            (t.map(Message::Launcher), e)
-        }
-        ActiveComponent::Ai => {
-            let (t, e) = f_ai(&mut state.ai_agent, &state.apps, &state.config);
-            (t.map(Message::Ai), e)
-        }
-    };
-    apply_event(state, event);
-    task
-}
-
-fn dispatch_nav(state: &mut Trebuchet, dir: NavDirection) {
-    let event = match state.active {
-        ActiveComponent::Launcher => state.launcher.handle_nav(dir, &state.config),
-        ActiveComponent::Ai => state.ai_agent.handle_nav(dir, &state.config),
-    };
-    apply_event(state, event);
-}
-
 // ── Update ────────────────────────────────────────────────────────────────────
 
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
@@ -137,62 +95,21 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             return state.ai_agent.update(m, &state.apps, &state.config).map(Message::Ai);
         }
 
-        Message::InputChar(c) => {
-            return dispatch_input(
-                state,
-                |l, apps, cfg| l.handle_char(c.clone(), apps, cfg),
-                |a, apps, cfg| a.handle_char(c.clone(), apps, cfg),
-            );
-        }
-        Message::InputBackspace => {
-            return dispatch_input(
-                state,
-                |l, apps, cfg| l.handle_backspace(apps, cfg),
-                |a, apps, cfg| a.handle_backspace(apps, cfg),
-            );
-        }
-        Message::Submit => {
-            return dispatch_input(
-                state,
-                |l, apps, cfg| l.handle_submit(apps, cfg),
-                |a, apps, cfg| a.handle_submit(apps, cfg),
-            );
+        Message::IcedEvent(event, status) => {
+            let (task, evt) = match state.active {
+                ActiveComponent::Launcher => {
+                    let (t, e) = state.launcher.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::Launcher), e)
+                }
+                ActiveComponent::Ai => {
+                    let (t, e) = state.ai_agent.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::Ai), e)
+                }
+            };
+            apply_event(state, evt);
+            return task;
         }
 
-        Message::Escape => {
-            let event = match state.active {
-                ActiveComponent::Launcher => state.launcher.handle_escape(),
-                ActiveComponent::Ai => state.ai_agent.handle_escape(),
-            };
-            apply_event(state, event);
-        }
-
-        Message::NavLeft => dispatch_nav(state, NavDirection::Left),
-        Message::NavRight => dispatch_nav(state, NavDirection::Right),
-        Message::NavUp => dispatch_nav(state, NavDirection::Up),
-        Message::NavDown => dispatch_nav(state, NavDirection::Down),
-
-        Message::PageNext => {
-            let event = match state.active {
-                ActiveComponent::Launcher => state.launcher.handle_page(1, &state.config),
-                ActiveComponent::Ai => state.ai_agent.handle_page(1, &state.config),
-            };
-            apply_event(state, event);
-        }
-        Message::PagePrev => {
-            let event = match state.active {
-                ActiveComponent::Launcher => state.launcher.handle_page(-1, &state.config),
-                ActiveComponent::Ai => state.ai_agent.handle_page(-1, &state.config),
-            };
-            apply_event(state, event);
-        }
-        Message::GoToPage(p) => {
-            let event = match state.active {
-                ActiveComponent::Launcher => state.launcher.handle_go_to_page(p, &state.config),
-                ActiveComponent::Ai => state.ai_agent.handle_go_to_page(p, &state.config),
-            };
-            apply_event(state, event);
-        }
         // Extra variants injected by #[to_layer_message] (layershell protocol messages).
         _ => {}
     }
@@ -233,44 +150,12 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
 // ── Event handler ─────────────────────────────────────────────────────────────
 
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
-    match event {
-        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => match &key {
-            Key::Named(Named::Enter) => Some(Message::Submit),
-            Key::Named(Named::Escape) => Some(Message::Escape),
-            Key::Named(Named::PageDown) => Some(Message::PageNext),
-            Key::Named(Named::PageUp) => Some(Message::PagePrev),
-            Key::Named(Named::ArrowRight) if status == Status::Ignored => {
-                Some(Message::NavRight)
-            }
-            Key::Named(Named::ArrowLeft) if status == Status::Ignored => {
-                Some(Message::NavLeft)
-            }
-            Key::Named(Named::ArrowDown) if status == Status::Ignored => {
-                Some(Message::NavDown)
-            }
-            Key::Named(Named::ArrowUp) if status == Status::Ignored => {
-                Some(Message::NavUp)
-            }
-            Key::Named(Named::Backspace) if status == Status::Ignored => {
-                Some(Message::InputBackspace)
-            }
-            Key::Named(Named::Space) if status == Status::Ignored => {
-                Some(Message::InputChar(" ".to_string()))
-            }
-            Key::Character(_)
-                if status == Status::Ignored
-                    && !modifiers.control()
-                    && !modifiers.alt()
-                    && !modifiers.logo() =>
-            {
-                text.as_ref().map(|t| Message::InputChar(t.to_string()))
-            }
-            _ => None,
-        },
+    match &event {
         Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Close),
         Event::Mouse(mouse::Event::ButtonPressed(_)) if status == Status::Ignored => {
             Some(Message::Close)
         }
+        Event::Keyboard(_) => Some(Message::IcedEvent(event, status)),
         _ => None,
     }
 }

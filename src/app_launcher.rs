@@ -1,14 +1,16 @@
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use iced::{
     alignment,
+    event::Status,
+    keyboard::{self, key::Named, Key},
     time,
     widget::{button, column, container, row, text},
-    Color, Element, Length, Subscription, Task,
+    Color, Element, Event, Length, Subscription, Task,
 };
 use std::time::Duration;
 
 use crate::command::{ComponentEvent, SlashCommand};
-use crate::component::{Component, NavDirection};
+use crate::component::Component;
 use crate::config::Config;
 use crate::launcher::{launch_app, AppEntry};
 use crate::ui::{app_grid, search_bar, SearchIcon, ShakeState};
@@ -81,10 +83,6 @@ impl AppLauncher {
         self.selected = Some(next);
         self.page = next / page_size;
     }
-}
-
-impl Component for AppLauncher {
-    type Msg = Msg;
 
     fn handle_char(
         &mut self,
@@ -144,20 +142,6 @@ impl Component for AppLauncher {
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn handle_escape(&mut self) -> ComponentEvent {
-        ComponentEvent::Exit
-    }
-
-    fn handle_nav(&mut self, dir: NavDirection, config: &Config) -> ComponentEvent {
-        match dir {
-            NavDirection::Right => self.move_selection(1, config),
-            NavDirection::Left => self.move_selection(-1, config),
-            NavDirection::Down => self.move_selection(config.columns as isize, config),
-            NavDirection::Up => self.move_selection(-(config.columns as isize), config),
-        }
-        ComponentEvent::Handled
-    }
-
     fn handle_page(&mut self, delta: i32, config: &Config) -> ComponentEvent {
         let page_size = config.columns * config.rows;
         let total = pages(self.filtered.len(), page_size);
@@ -171,11 +155,63 @@ impl Component for AppLauncher {
         ComponentEvent::Handled
     }
 
-    fn handle_go_to_page(&mut self, p: usize, config: &Config) -> ComponentEvent {
-        let page_size = config.columns * config.rows;
-        let total = pages(self.filtered.len(), page_size);
-        self.page = p.min(total.saturating_sub(1));
-        ComponentEvent::Handled
+}
+
+impl Component for AppLauncher {
+    type Msg = Msg;
+
+    fn handle_event(
+        &mut self,
+        event: &Event,
+        status: Status,
+        apps: &[AppEntry],
+        config: &Config,
+    ) -> (Task<Msg>, ComponentEvent) {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        else {
+            return (Task::none(), ComponentEvent::Handled);
+        };
+        match key {
+            Key::Named(Named::Enter) => self.handle_submit(apps, config),
+            Key::Named(Named::Escape) => (Task::none(), ComponentEvent::Exit),
+            Key::Named(Named::PageDown) => (Task::none(), self.handle_page(1, config)),
+            Key::Named(Named::PageUp) => (Task::none(), self.handle_page(-1, config)),
+            Key::Named(Named::ArrowRight) if status == Status::Ignored => {
+                self.move_selection(1, config);
+                (Task::none(), ComponentEvent::Handled)
+            }
+            Key::Named(Named::ArrowLeft) if status == Status::Ignored => {
+                self.move_selection(-1, config);
+                (Task::none(), ComponentEvent::Handled)
+            }
+            Key::Named(Named::ArrowDown) if status == Status::Ignored => {
+                self.move_selection(config.columns as isize, config);
+                (Task::none(), ComponentEvent::Handled)
+            }
+            Key::Named(Named::ArrowUp) if status == Status::Ignored => {
+                self.move_selection(-(config.columns as isize), config);
+                (Task::none(), ComponentEvent::Handled)
+            }
+            Key::Named(Named::Backspace) if status == Status::Ignored => {
+                self.handle_backspace(apps, config)
+            }
+            Key::Named(Named::Space) if status == Status::Ignored => {
+                self.handle_char(" ".to_string(), apps, config)
+            }
+            Key::Character(_)
+                if status == Status::Ignored
+                    && !modifiers.control()
+                    && !modifiers.alt()
+                    && !modifiers.logo() =>
+            {
+                if let Some(t) = text.as_ref() {
+                    self.handle_char(t.to_string(), apps, config)
+                } else {
+                    (Task::none(), ComponentEvent::Handled)
+                }
+            }
+            _ => (Task::none(), ComponentEvent::Handled),
+        }
     }
 
     fn update(&mut self, msg: Msg, apps: &[AppEntry], config: &Config) -> Task<Msg> {
@@ -323,7 +359,6 @@ mod tests {
     #[test]
     fn empty_query_shows_all() {
         let (_apps, launcher) = make_launcher(&["Firefox", "Code", "Terminal"]);
-        // New launcher shows all by default
         assert_eq!(launcher.filtered, vec![0, 1, 2]);
     }
 
@@ -364,7 +399,6 @@ mod tests {
 
     #[test]
     fn page_next_advances() {
-        // 7 items, page_size=6 → 2 pages
         let (_apps, mut launcher) = make_launcher(&["A", "B", "C", "D", "E", "F", "G"]);
         launcher.handle_page(1, &cfg());
         assert_eq!(launcher.page, 1);
@@ -396,8 +430,8 @@ mod tests {
     #[test]
     fn go_to_page_clamps_to_last() {
         // 6 items, page_size=6 → 1 page (index 0 only)
-        let (_apps, mut launcher) = make_launcher(&["A", "B", "C", "D", "E", "F"]);
-        launcher.handle_go_to_page(99, &cfg());
+        let (apps, mut launcher) = make_launcher(&["A", "B", "C", "D", "E", "F"]);
+        let _ = launcher.update(Msg::GoToPage(99), &apps, &cfg());
         assert_eq!(launcher.page, 0);
     }
 }

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- `Component` trait reduced to a single `handle_event(event, status, apps, config)` method; components parse raw iced events directly instead of receiving pre-translated message variants
+- `app::Message` reduced from 14 variants to 4 (`Close`, `IcedEvent`, `Launcher`, `Ai`); `on_event` is now a trivial pass-through
+- Removed `NavDirection` enum and all `dispatch_input`/`dispatch_nav` helpers from `app.rs`
+
 ## [0.1.0] - 2026-03-03
 
 ### Added
