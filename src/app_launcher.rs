@@ -172,7 +172,23 @@ impl Component for AppLauncher {
             return (Task::none(), ComponentEvent::Handled);
         };
         match key {
-            Key::Named(Named::Enter) => self.handle_submit(apps, config),
+            Key::Named(Named::Enter) => {
+                // A bare slash command (e.g. `/ai` without trailing space) followed by
+                // Enter should switch modes, same as typing the command with a space.
+                if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", self.query.trim())) {
+                    return match cmd {
+                        SlashCommand::Ai => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args)),
+                        SlashCommand::App => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args)),
+                        SlashCommand::Unknown(_) => {
+                            self.shake = ShakeState::trigger();
+                            self.query.clear();
+                            self.apply_filter(apps, "");
+                            (Task::none(), ComponentEvent::Handled)
+                        }
+                    };
+                }
+                self.handle_submit(apps, config)
+            }
             Key::Named(Named::Escape) => (Task::none(), ComponentEvent::Exit),
             Key::Named(Named::PageDown) => (Task::none(), self.handle_page(1, config)),
             Key::Named(Named::PageUp) => (Task::none(), self.handle_page(-1, config)),

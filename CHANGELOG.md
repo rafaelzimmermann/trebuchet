@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Bare slash command + Enter switches mode: `/ai` ↵ enters AI mode, `/app` ↵ returns to launcher (previously a trailing space was required)
+
 ### Changed
 - `Component` trait reduced to a single `handle_event(event, status, apps, config)` method; components parse raw iced events directly instead of receiving pre-translated message variants
 - `app::Message` reduced from 14 variants to 4 (`Close`, `IcedEvent`, `Launcher`, `Ai`); `on_event` is now a trivial pass-through

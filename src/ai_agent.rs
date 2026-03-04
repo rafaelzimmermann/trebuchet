@@ -122,7 +122,13 @@ impl Component for AIAgent {
             return (Task::none(), ComponentEvent::Handled);
         };
         match key {
-            Key::Named(Named::Enter) => self.do_submit(config),
+            Key::Named(Named::Enter) => {
+                // `/app` (bare, no trailing space) + Enter returns to launcher.
+                if let Some((SlashCommand::App, args)) = SlashCommand::detect(&format!("{} ", self.query.trim())) {
+                    return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
+                }
+                self.do_submit(config)
+            }
             Key::Named(Named::Escape) => {
                 self.query.clear();
                 (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, String::new()))
