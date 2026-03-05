@@ -126,20 +126,107 @@ if [[ ! -f Cargo.toml ]]; then
     cd "$CLONE_DIR"
 fi
 
-# ── Icons ─────────────────────────────────────────────────────────────────────
+# ── Upfront questions (ask everything before the build starts) ────────────────
 
+UPDATE_ICONS=false
 if $FETCH_ICONS; then
     if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
         if confirm "Icons already exist. Update them?"; then
-            echo "Updating icons…"
-            bash scripts/fetch-icons.sh
-        else
-            echo "Keeping existing icons."
+            UPDATE_ICONS=true
         fi
     else
-        echo "Fetching icons…"
-        bash scripts/fetch-icons.sh
+        UPDATE_ICONS=true
     fi
+fi
+
+# CONFIG_FRESH=true  → fresh install or user chose to overwrite → offer AI setup
+# CONFIG_FRESH=false → user kept their existing config → skip AI setup
+CONFIG_FRESH=false
+OVERWRITE_CONFIG=false
+mkdir -p "$CONFIG_DIR"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    CONFIG_FRESH=true
+else
+    if confirm "Config already exists at $CONFIG_FILE. Overwrite?"; then
+        OVERWRITE_CONFIG=true
+        CONFIG_FRESH=true
+    fi
+fi
+
+# Collect AI setup answers upfront; write to config after install.
+DO_AI_SETUP=false
+AI_PROVIDER="" AI_MODEL="" AI_API_KEY="" AI_BASE_URL=""
+
+if [[ -t 0 ]] && ! $YES && ! $NO && $CONFIG_FRESH; then
+    echo ""
+    if confirm "Would you like to set up the AI assistant?"; then
+        DO_AI_SETUP=true
+        echo ""
+        echo "AI assistant setup"
+        echo "════════════════════════════════════════════"
+        echo "Enables '/ai <question>' in the launcher."
+        echo ""
+        echo "  1) OpenAI     — default: gpt-4o             (API key required)"
+        echo "  2) Anthropic  — default: claude-sonnet-4-6  (API key required)"
+        echo "  3) Gemini     — default: gemini-2.0-flash   (API key required)"
+        echo "  4) Ollama     — local, no API key needed"
+        echo "  5) Other      — custom OpenAI-compatible endpoint"
+        echo ""
+
+        local_choice=""
+        while true; do
+            read -r -n 1 -p "Provider [1-5]: " local_choice
+            echo ""
+            case "$local_choice" in 1|2|3|4|5) break ;; *) echo "Please enter 1–5." ;; esac
+        done
+
+        local_default_model="" local_key_url="" local_needs_key=false local_default_url=""
+        case "$local_choice" in
+            1) AI_PROVIDER="openai";    local_default_model="gpt-4o";             local_key_url="https://platform.openai.com/api-keys";          local_needs_key=true;  local_default_url="" ;;
+            2) AI_PROVIDER="anthropic"; local_default_model="claude-sonnet-4-6";  local_key_url="https://console.anthropic.com/settings/keys";  local_needs_key=true;  local_default_url="" ;;
+            3) AI_PROVIDER="gemini";    local_default_model="gemini-2.0-flash";   local_key_url="https://aistudio.google.com/app/apikey";       local_needs_key=true;  local_default_url="" ;;
+            4) AI_PROVIDER="ollama";    local_default_model="llama3.2";           local_key_url="";                                             local_needs_key=false; local_default_url="http://localhost:11434" ;;
+            5) AI_PROVIDER="openai";    local_default_model="";                   local_key_url="";                                             local_needs_key=true;  local_default_url="" ;;
+        esac
+
+        echo ""
+        if [[ -n "$local_default_model" ]]; then
+            read -r -p "Model [$local_default_model]: " AI_MODEL
+            AI_MODEL="${AI_MODEL:-$local_default_model}"
+        else
+            read -r -p "Model (e.g. gpt-4o, mistral): " AI_MODEL
+        fi
+
+        if $local_needs_key; then
+            echo ""
+            [[ -n "$local_key_url" ]] && echo "Get your API key at: $local_key_url"
+            read -r -s -p "API key: " AI_API_KEY
+            echo ""
+        fi
+
+        echo ""
+        if [[ "$local_choice" == "4" ]]; then
+            read -r -p "Ollama base URL [$local_default_url]: " AI_BASE_URL
+            AI_BASE_URL="${AI_BASE_URL:-$local_default_url}"
+        elif [[ "$local_choice" == "5" ]]; then
+            read -r -p "Base URL (e.g. http://localhost:8080): " AI_BASE_URL
+        fi
+    fi
+fi
+
+echo ""
+
+# ── Icons ─────────────────────────────────────────────────────────────────────
+
+if $FETCH_ICONS && $UPDATE_ICONS; then
+    if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
+        echo "Updating icons…"
+    else
+        echo "Fetching icons…"
+    fi
+    bash scripts/fetch-icons.sh
+elif $FETCH_ICONS; then
+    echo "Keeping existing icons."
 fi
 
 # ── Build (always as the invoking user) ───────────────────────────────────────
@@ -159,105 +246,27 @@ if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
     priv_cp -r assets/icons/. "$ICON_DEST/"
 fi
 
-# Install default config; prompt before overwriting an existing one.
-# CONFIG_FRESH=true  → fresh install or user chose to overwrite → offer AI setup
-# CONFIG_FRESH=false → user kept their existing config → skip AI setup
-CONFIG_FRESH=false
-mkdir -p "$CONFIG_DIR"
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "Installing default config to $CONFIG_FILE…"
-    cp assets/trebuchet.conf "$CONFIG_FILE"
-    CONFIG_FRESH=true
-else
-    if confirm "Config already exists at $CONFIG_FILE. Overwrite?"; then
-        cp assets/trebuchet.conf "$CONFIG_FILE"
+if [[ ! -f "$CONFIG_FILE" ]] || $OVERWRITE_CONFIG; then
+    if $OVERWRITE_CONFIG; then
         echo "Config replaced."
-        CONFIG_FRESH=true
     else
-        echo "Keeping existing config."
+        echo "Installing default config to $CONFIG_FILE…"
     fi
+    cp assets/trebuchet.conf "$CONFIG_FILE"
+else
+    echo "Keeping existing config."
 fi
 
-# ── AI assistant setup ────────────────────────────────────────────────────────
-# Offered only in an interactive terminal; skipped when --yes is set.
-
-setup_ai() {
-    echo ""
-    echo "AI assistant setup"
-    echo "════════════════════════════════════════════"
-    echo "Enables '/ai <question>' in the launcher."
-    echo ""
-    echo "  1) OpenAI     — default: gpt-4o             (API key required)"
-    echo "  2) Anthropic  — default: claude-sonnet-4-6  (API key required)"
-    echo "  3) Gemini     — default: gemini-2.0-flash   (API key required)"
-    echo "  4) Ollama     — local, no API key needed"
-    echo "  5) Other      — custom OpenAI-compatible endpoint"
-    echo ""
-
-    local choice
-    while true; do
-        read -r -n 1 -p "Provider [1-5]: " choice
-        echo ""
-        case "$choice" in 1|2|3|4|5) break ;; *) echo "Please enter 1–5." ;; esac
-    done
-
-    local provider default_model key_url needs_key default_url
-    case "$choice" in
-        1) provider="openai";    default_model="gpt-4o";             key_url="https://platform.openai.com/api-keys";          needs_key=true;  default_url="" ;;
-        2) provider="anthropic"; default_model="claude-sonnet-4-6";  key_url="https://console.anthropic.com/settings/keys";  needs_key=true;  default_url="" ;;
-        3) provider="gemini";    default_model="gemini-2.0-flash";   key_url="https://aistudio.google.com/app/apikey";       needs_key=true;  default_url="" ;;
-        4) provider="ollama";    default_model="llama3.2";           key_url="";                                             needs_key=false; default_url="http://localhost:11434" ;;
-        5) provider="openai";    default_model="";                   key_url="";                                             needs_key=true;  default_url="" ;;
-    esac
-
-    # Model
-    echo ""
-    local model
-    if [[ -n "$default_model" ]]; then
-        read -r -p "Model [$default_model]: " model
-        model="${model:-$default_model}"
-    else
-        read -r -p "Model (e.g. gpt-4o, mistral): " model
-    fi
-
-    # API key
-    local api_key=""
-    if $needs_key; then
-        echo ""
-        [[ -n "$key_url" ]] && echo "Get your API key at: $key_url"
-        read -r -s -p "API key: " api_key
-        echo ""
-    fi
-
-    # Base URL — prompted for Ollama (to allow overriding) and Other (required)
-    local base_url=""
-    echo ""
-    if [[ "$choice" == "4" ]]; then
-        read -r -p "Ollama base URL [$default_url]: " base_url
-        base_url="${base_url:-$default_url}"
-    elif [[ "$choice" == "5" ]]; then
-        read -r -p "Base URL (e.g. http://localhost:8080): " base_url
-    fi
-
-    # Append settings to config
+if $DO_AI_SETUP; then
     {
         printf "\n# AI assistant\n"
-        printf "ai_provider = %s\n" "$provider"
-        [[ -n "$model"    ]] && printf "ai_model    = %s\n" "$model"
-        [[ -n "$api_key"  ]] && printf "ai_api_key  = %s\n" "$api_key"
-        [[ -n "$base_url" ]] && printf "ai_base_url = %s\n" "$base_url"
+        printf "ai_provider = %s\n" "$AI_PROVIDER"
+        [[ -n "$AI_MODEL"   ]] && printf "ai_model    = %s\n" "$AI_MODEL"
+        [[ -n "$AI_API_KEY" ]] && printf "ai_api_key  = %s\n" "$AI_API_KEY"
+        [[ -n "$AI_BASE_URL" ]] && printf "ai_base_url = %s\n" "$AI_BASE_URL"
     } >> "$CONFIG_FILE"
-
     echo ""
-    echo "AI assistant configured."
-    echo "Type /ai <question> in trebuchet to try it."
-}
-
-if [[ -t 0 ]] && ! $YES && ! $NO && $CONFIG_FRESH; then
-    echo ""
-    if confirm "Would you like to set up the AI assistant?"; then
-        setup_ai
-    fi
+    echo "AI assistant configured. Type /ai <question> in trebuchet to try it."
 fi
 
 priv_mkdir "$DESKTOP_DIR"

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `install.sh`: all interactive prompts (icons update, config overwrite, AI setup wizard) are now gathered upfront before the build starts, so the installation runs unattended once questions are answered
+
 ## [0.2.0] - 2026-03-04
 
 ### Added
