@@ -1,5 +1,8 @@
 /target
 .claude
+.env
+progress.log
+
 
 # Bundled icons are fetched at setup time, not committed.
 # Run:  bash scripts/fetch-icons.sh

@@ -1,6 +1,6 @@
 use iced::{
     alignment,
-    widget::{button, column, container, markdown, row, scrollable, svg, text, Space},
+    widget::{button, column, container, markdown, pick_list, row, scrollable, svg, text, Space},
     Alignment, Background, Border, Color, Element, Font, Length, Padding,
 };
 
@@ -70,9 +70,12 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
     prompt: &str,
     copy_feedback: bool,
     items: &'a [markdown::Item],
+    models: Vec<String>,
+    selected_model: Option<String>,
     on_copy: Msg,
     on_retry: Msg,
     on_link: impl Fn(String) -> Msg + 'a,
+    on_model_select: impl Fn(String) -> Msg + 'a,
 ) -> Element<'a, Msg> {
     let can_copy = matches!(status, AiStatus::Done(_));
     let can_retry = matches!(status, AiStatus::Done(_) | AiStatus::Error(_));
@@ -139,6 +142,22 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
 
     // ── Action bar — outside the dark box ─────────────────────────────────────
 
+    let model_picker: Element<'a, Msg> = if models.is_empty() {
+        Space::new().width(0).height(0).into()
+    } else {
+        pick_list(models, selected_model, on_model_select)
+            .text_size(13)
+            .padding([4, 8])
+            .style(|_theme, _status| pick_list::Style {
+                text_color: Color::WHITE,
+                placeholder_color: Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 },
+                handle_color: Color { r: 0.7, g: 0.7, b: 0.7, a: 1.0 },
+                background: Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.08 }),
+                border: Border { radius: 6.0.into(), ..Default::default() },
+            })
+            .into()
+    };
+
     let feedback: Element<'a, Msg> = if copy_feedback {
         text("Copied to clipboard")
             .size(13)
@@ -149,6 +168,7 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
     };
 
     let action_bar = row![
+        model_picker,
         feedback,
         Space::new().width(Length::Fill),
         icon_btn(COPY_ICON, on_copy, can_copy),

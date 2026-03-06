@@ -31,6 +31,8 @@ pub struct AIAgent {
     copy_feedback: bool,
     response_items: Vec<markdown::Item>,
     shake: ShakeState,
+    /// Index into `config.ai_models` for the currently selected model.
+    selected_model: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,7 @@ pub enum Msg {
     LoadingTick,
     ShakeTick,
     LinkClicked(String),
+    ModelSelected(String),
 }
 
 impl AIAgent {
@@ -54,6 +57,7 @@ impl AIAgent {
             copy_feedback: false,
             response_items: Vec::new(),
             shake: ShakeState::default(),
+            selected_model: 0,
         }
     }
 
@@ -71,12 +75,13 @@ impl AIAgent {
         self.prompt = prompt.clone();
         self.status = AiStatus::Loading { tick: 0 };
         self.response_items.clear();
+        let m = config.ai_models.get(self.selected_model);
         let req = AiRequest {
             prompt,
-            provider: config.ai_provider.clone(),
-            api_key: config.ai_api_key.clone(),
-            model: config.ai_model.clone(),
-            base_url: config.ai_base_url.clone(),
+            provider: m.map(|m| m.provider.clone()).unwrap_or_default(),
+            api_key:  m.and_then(|m| m.api_key.clone()),
+            model:    m.and_then(|m| m.model.clone()),
+            base_url: m.and_then(|m| m.base_url.clone()),
         };
         Task::perform(ai_client::query(req), Msg::Response)
     }
@@ -204,11 +209,19 @@ impl Component for AIAgent {
             Msg::LinkClicked(url) => {
                 let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
             }
+            Msg::ModelSelected(label) => {
+                if let Some(idx) = config.ai_models.iter().position(|m| m.label == label) {
+                    self.selected_model = idx;
+                }
+            }
         }
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn view<'a>(&'a self, _apps: &'a [AppEntry], _config: &'a Config) -> Element<'a, Msg> {
+    fn view<'a>(&'a self, _apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
+        let model_labels: Vec<String> = config.ai_models.iter().map(|m| m.label.clone()).collect();
+        let selected_label = model_labels.get(self.selected_model).cloned();
+
         let content = iced::widget::column![
             search_bar(&self.query, &self.shake, SearchIcon::Robot, Msg::QueryChanged),
             ai_panel(
@@ -216,9 +229,12 @@ impl Component for AIAgent {
                 &self.prompt,
                 self.copy_feedback,
                 &self.response_items,
+                model_labels,
+                selected_label,
                 Msg::CopyResponse,
                 Msg::Retry,
                 Msg::LinkClicked,
+                Msg::ModelSelected,
             ),
         ]
         .spacing(16)

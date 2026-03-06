@@ -4,7 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Model picker at the bottom-left of the AI panel: switch between configured models mid-session without touching the config
+- `[[ai_model]]` config block with comma-separated `model` field — one block per provider, one entry per model in the picker (e.g. `model = claude-sonnet-4-6, claude-opus-4-6`)
+- Picker labels are auto-generated as `provider:model` (e.g. `anthropic:claude-sonnet-4-6`)
+- Multiple `[[ai_model]]` blocks supported; the first model of the first block is the default
+
 ### Changed
+- AI config restructured: four flat keys (`ai_provider`, `ai_api_key`, `ai_model`, `ai_base_url`) replaced by `[[ai_model]]` blocks; flat keys still work as a single-model shorthand for backward compatibility
 - `install.sh`: all interactive prompts (icons update, config overwrite, AI setup wizard) are now gathered upfront before the build starts, so the installation runs unattended once questions are answered
 
 ## [0.2.0] - 2026-03-04

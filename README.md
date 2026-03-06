@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/3a6caffb-aa08-4783-8f2a-d0f1bb18a015
 - Terminal apps (`Terminal=true`) are auto-detected and launched in your terminal emulator
 - Escape to close
 - Launches on the active screen
-- Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model without leaving the launcher
+- Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model; switch between configured models on the fly with the bottom-left picker
 - Custom commands — define shell shortcuts in config (e.g. `/shutdown`, `/uptime`) with optional output display
 
 
@@ -125,20 +125,45 @@ Press **Escape** to leave AI mode and return to the app grid without closing the
 | Google Gemini | `gemini` | Yes |
 | Ollama (local) | `ollama` | No |
 
-The install script offers an interactive setup wizard. To configure manually, add the following to `~/.config/trebuchet/trebuchet.conf`:
+### Configuring models
+
+Define one `[[ai_model]]` block per provider. The `model` field accepts a comma-separated list — each model becomes a selectable entry in the picker shown at the bottom-left of the AI panel, labelled `provider:model`. The first model in the first block is the default.
+
+```ini
+# ~/.config/trebuchet/trebuchet.conf
+
+[[ai_model]]
+provider = anthropic
+api_key  = sk-ant-api03-...
+model    = claude-sonnet-4-6, claude-opus-4-6
+
+[[ai_model]]
+provider = openai
+api_key  = sk-proj-...
+model    = gpt-4o, gpt-4-turbo
+
+[[ai_model]]
+provider = ollama
+model    = llama3.2, mistral
+```
+
+Each block supports these keys:
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `provider` | Yes | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `api_key` | For cloud providers | Your API key |
+| `model` | No | Comma-separated model IDs; falls back to the provider default if omitted |
+| `base_url` | No | Override the API endpoint (useful for Ollama or compatible proxies) |
+
+#### Single-model shorthand (legacy)
+
+The older flat-key syntax still works and is equivalent to a single `[[ai_model]]` block:
 
 ```ini
 ai_provider = anthropic
 ai_api_key  = sk-ant-...
-ai_model    = claude-sonnet-4-6   # optional, falls back to provider default
-```
-
-For Ollama, set the base URL instead of an API key:
-
-```ini
-ai_provider = ollama
-ai_base_url = http://localhost:11434
-ai_model    = llama3.2
+ai_model    = claude-sonnet-4-6
 ```
 
 ## Custom commands
