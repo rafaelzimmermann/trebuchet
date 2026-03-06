@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - AI config restructured: four flat keys (`ai_provider`, `ai_api_key`, `ai_model`, `ai_base_url`) replaced by `[[ai_model]]` blocks; flat keys still work as a single-model shorthand for backward compatibility
 - `install.sh`: all interactive prompts (icons update, config overwrite, AI setup wizard) are now gathered upfront before the build starts, so the installation runs unattended once questions are answered
+- `fetch-icons.sh`: added `FETCH_AS` alias map so icon save-name can differ from the Papirus/Simple-Icons lookup name; removed unavailable icons (cohere, xai, orca-slicer, pamac-manager)
+- Search bar placeholder text is now mode-aware: "Search apps..." in launcher mode, "Ask anything..." in AI mode, empty in terminal/command mode
 
 ## [0.2.0] - 2026-03-04
 

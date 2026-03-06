@@ -78,39 +78,34 @@ papirus_symlink_target() {
 }
 
 remote_fetch_one() {
-    local name="$1"
-    local dest="$DEST/$name.svg"
+    local lookup="$1" dest="$2"
 
     for size in "${REMOTE_SIZES[@]}"; do
         # jsDelivr (no branch name required)
         if curl -sf --max-time 15 \
-                "$JSDELIVR/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
+                "$JSDELIVR/Papirus/$size/apps/$lookup.svg" -o "$dest" 2>/dev/null; then
             # Follow Papirus symlink if needed
             if target=$(papirus_symlink_target "$dest"); then
                 if curl -sf --max-time 15 \
                         "$JSDELIVR/Papirus/$size/apps/$target" -o "$dest" 2>/dev/null; then
-                    echo "  ↓  $name → $target  ($size)"
                     return 0
                 fi
                 rm -f "$dest"
             else
-                echo "  ↓  $name  ($size)"
                 return 0
             fi
         fi
         # raw.githubusercontent.com fallback (try both common branch names)
         for branch in master main; do
             if curl -sf --max-time 15 \
-                    "$RAW/$branch/Papirus/$size/apps/$name.svg" -o "$dest" 2>/dev/null; then
+                    "$RAW/$branch/Papirus/$size/apps/$lookup.svg" -o "$dest" 2>/dev/null; then
                 if target=$(papirus_symlink_target "$dest"); then
                     if curl -sf --max-time 15 \
                             "$RAW/$branch/Papirus/$size/apps/$target" -o "$dest" 2>/dev/null; then
-                        echo "  ↓  $name → $target  ($size/$branch)"
                         return 0
                     fi
                     rm -f "$dest"
                 else
-                    echo "  ↓  $name  ($size/$branch)"
                     return 0
                 fi
             fi
@@ -124,11 +119,9 @@ remote_fetch_one() {
 SIMPLE_ICONS_CDN="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons"
 
 remote_fetch_simple_icons() {
-    local name="$1"
-    local dest="$DEST/$name.svg"
+    local lookup="$1" dest="$2"
     if curl -sf --max-time 15 \
-            "$SIMPLE_ICONS_CDN/$name.svg" -o "$dest" 2>/dev/null; then
-        echo "  ↓  $name  (simple-icons)"
+            "$SIMPLE_ICONS_CDN/$lookup.svg" -o "$dest" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -166,10 +159,10 @@ bulk_clone_papirus() {
 }
 
 remote_fetch_from_clone() {
-    local name="$1"
+    local lookup="$1" dest="$2"
     [[ -z "$CLONE_DIR" ]] && return 1
     for size in "${REMOTE_SIZES[@]}"; do
-        local src="$CLONE_DIR/Papirus/$size/apps/$name.svg"
+        local src="$CLONE_DIR/Papirus/$size/apps/$lookup.svg"
         if [[ -f "$src" ]]; then
             # Follow Papirus symlink if needed
             if target=$(papirus_symlink_target "$src"); then
@@ -177,38 +170,57 @@ remote_fetch_from_clone() {
                 [[ -f "$target_src" ]] || continue
                 src="$target_src"
             fi
-            cp "$src" "$DEST/$name.svg"
-            echo "  ↓  $name  ($size, from clone)"
+            cp "$src" "$dest"
             return 0
         fi
     done
     return 1
 }
 
+# ── Icon-name aliases ─────────────────────────────────────────────────────────
+# Maps save-name → lookup-name when the Papirus/Simple-Icons filename differs
+# from the Icon= field in the .desktop file (and our assets/icons/ filename).
+
+declare -A FETCH_AS=(
+    [celluloid]="io.github.celluloid_player.Celluloid"
+    [epiphany]="org.gnome.Epiphany"
+    [gnome-tweaks]="org.gnome.tweaks"
+    [handbrake]="fr.handbrake.ghb"
+    [org.gnome.Seahorse]="org.gnome.seahorse.Application"
+    [pcmanfm]="system-file-manager"
+    [totem]="org.gnome.Totem"
+)
+
 # ── Per-icon fetch orchestration ──────────────────────────────────────────────
 
 fetch() {
     local name="$1"
+    local lookup="${FETCH_AS[$name]:-$name}"
+    local dest="$DEST/$name.svg"
 
-    if [[ -f "$DEST/$name.svg" || -f "$DEST/$name.png" ]]; then
+    if [[ -f "$dest" || -f "$DEST/$name.png" ]]; then
         touch "$TMP/skip_${name}"
         return 0
     fi
 
     local src
-    if src=$(local_lookup "$name" 2>/dev/null); then
-        cp "$src" "$DEST/$name.${src##*.}"
+    if src=$(local_lookup "$lookup" 2>/dev/null); then
+        cp "$src" "$dest"
         echo "  ✓  $name"
         touch "$TMP/ok_${name}"
         return 0
     fi
 
-    if remote_fetch_one "$name"; then
+    if remote_fetch_one "$lookup" "$dest"; then
+        [[ "$lookup" != "$name" ]] \
+            && echo "  ↓  $name  (← $lookup)" \
+            || echo "  ↓  $name"
         touch "$TMP/ok_${name}"
         return 0
     fi
 
-    if remote_fetch_simple_icons "$name"; then
+    if remote_fetch_simple_icons "$lookup" "$dest"; then
+        echo "  ↓  $name  (simple-icons)"
         touch "$TMP/ok_${name}"
         return 0
     fi
@@ -242,7 +254,7 @@ ICONS=(
     
     # AI / LLM services
     anthropic claude openai googlegemini mistralai
-    perplexity xai cohere huggingface ollama
+    perplexity huggingface ollama
 
     # Media
     spotify vlc mpv celluloid rhythmbox clementine lollypop
@@ -267,7 +279,7 @@ ICONS=(
     org.gnome.Settings gnome-control-center org.gnome.Calculator
     org.gnome.SystemMonitor org.gnome.DiskUtility org.gnome.baobab
     gparted keepassxc bitwarden org.gnome.Seahorse gnome-tweaks
-    org.gnome.Extensions synaptic pamac-manager
+    org.gnome.Extensions synaptic
 
     # Misc
     evince org.gnome.Evince okular org.gnome.clocks org.gnome.Maps
@@ -296,7 +308,12 @@ if [[ -e "${need_clone[0]}" ]]; then
     bulk_clone_papirus || true   # CLONE_DIR="" on failure; handled below
     for marker in "${need_clone[@]}"; do
         name="${marker##*/need_clone_}"
-        if remote_fetch_from_clone "$name"; then
+        lookup="${FETCH_AS[$name]:-$name}"
+        dest="$DEST/$name.svg"
+        if remote_fetch_from_clone "$lookup" "$dest"; then
+            [[ "$lookup" != "$name" ]] \
+                && echo "  ↓  $name  (← $lookup, from clone)" \
+                || echo "  ↓  $name  (from clone)"
             rm "$marker"
             touch "$TMP/ok_${name}"
         else

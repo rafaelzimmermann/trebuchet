@@ -51,6 +51,7 @@ impl ShakeState {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum SearchIcon {
     Search,
     Robot,
@@ -73,7 +74,12 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         .height(20)
         .into();
 
-    let input = text_input("Search apps...", query)
+    let placeholder = match icon {
+        SearchIcon::Search   => "Search apps...",
+        SearchIcon::Robot    => "Ask anything...",
+        SearchIcon::Terminal => "",
+    };
+    let input = text_input(placeholder, query)
         .id(Id::new(search_id))
         .on_input(on_input)
         .padding(0)
