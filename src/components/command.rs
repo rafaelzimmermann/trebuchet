@@ -3,6 +3,7 @@ pub enum SlashCommand {
     Ai,
     App,
     Config,
+    Cmd,
     Unknown(String),
 }
 
@@ -20,10 +21,24 @@ impl SlashCommand {
                 "ai"     => SlashCommand::Ai,
                 "app"    => SlashCommand::App,
                 "config" => SlashCommand::Config,
+                "cmd"    => SlashCommand::Cmd,
                 s        => SlashCommand::Unknown(s.to_string()),
             },
             args,
         ))
+    }
+
+    /// Returns a nav ComponentEvent if `query` triggers a navigation command.
+    /// Works for space-triggered dispatch (query already ends with space) and
+    /// Enter-triggered dispatch (call with `format!("{} ", query.trim())`).
+    pub fn as_nav_event(query: &str) -> Option<ComponentEvent> {
+        match Self::detect(query) {
+            Some((Self::Ai, args))     => Some(ComponentEvent::CommandInvoked(Self::Ai, args)),
+            Some((Self::App, args))    => Some(ComponentEvent::CommandInvoked(Self::App, args)),
+            Some((Self::Config, args)) => Some(ComponentEvent::CommandInvoked(Self::Config, args)),
+            Some((Self::Cmd, args))    => Some(ComponentEvent::CommandInvoked(Self::Cmd, args)),
+            _ => None,
+        }
     }
 }
 

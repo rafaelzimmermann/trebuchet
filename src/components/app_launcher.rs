@@ -92,9 +92,7 @@ impl AppLauncher {
         self.query.push_str(&c);
 
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
-            // Only auto-dispatch pure navigation commands on space; commands
-            // that take arguments (Theme, Unknown) wait for Enter.
-            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config) {
+            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
                 self.query.clear();
                 self.apply_filter(apps, "");
                 return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -165,12 +163,16 @@ impl Component for AppLauncher {
         };
         match key {
             Key::Named(Named::Enter) => {
-                // Slash command (bare `/cmd` + Enter treated same as `/cmd ` + Space).
                 let trimmed = self.query.trim().to_string();
                 if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
-                    self.query.clear();
-                    self.apply_filter(apps, "");
-                    return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
+                        self.query.clear();
+                        self.apply_filter(apps, "");
+                        return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+                    }
+                    // Unknown slash command → shake.
+                    self.shake = ShakeState::trigger();
+                    return (Task::none(), ComponentEvent::Handled);
                 }
                 // Launch the selected app.
                 self.handle_submit(apps, config)
@@ -220,7 +222,7 @@ impl Component for AppLauncher {
         match msg {
             Msg::QueryChanged(s) => {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
-                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config) {
+                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
                         self.query = String::new();
                         self.apply_filter(apps, "");
                         return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));

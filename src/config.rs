@@ -109,7 +109,7 @@ impl Config {
                             display: &mut bool| {
             if !prefix.is_empty() && !command.is_empty() {
                 base.commands.push(CustomCommand {
-                    prefix: std::mem::take(prefix),
+                    prefix: std::mem::take(prefix).trim_start_matches('/').to_string(),
                     command: std::mem::take(command),
                     display_result: std::mem::take(display),
                 });
@@ -338,7 +338,7 @@ mod tests {
     fn command_block_parsed() {
         let cfg = Config::parse(defaults(), "[[command]]\nprefix = /hi\ncommand = echo hi\n");
         assert_eq!(cfg.commands.len(), 1);
-        assert_eq!(cfg.commands[0].prefix, "/hi");
+        assert_eq!(cfg.commands[0].prefix, "hi");
         assert_eq!(cfg.commands[0].command, "echo hi");
         assert!(!cfg.commands[0].display_result);
     }
@@ -354,9 +354,9 @@ mod tests {
         let content = "[[command]]\nprefix = /a\ncommand = echo a\n\n[[command]]\nprefix = /b\ncommand = echo b\ndisplay_result = true\n";
         let cfg = Config::parse(defaults(), content);
         assert_eq!(cfg.commands.len(), 2);
-        assert_eq!(cfg.commands[0].prefix, "/a");
+        assert_eq!(cfg.commands[0].prefix, "a");
         assert!(!cfg.commands[0].display_result);
-        assert_eq!(cfg.commands[1].prefix, "/b");
+        assert_eq!(cfg.commands[1].prefix, "b");
         assert!(cfg.commands[1].display_result);
     }
 

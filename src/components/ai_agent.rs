@@ -90,8 +90,9 @@ impl AIAgent {
 impl AIAgent {
     fn do_char(&mut self, c: String) -> (Task<Msg>, ComponentEvent) {
         self.query.push_str(&c);
-        if let Some((SlashCommand::App, args)) = SlashCommand::detect(&self.query) {
-            return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
+        if let Some(evt) = SlashCommand::as_nav_event(&self.query) {
+            self.query.clear();
+            return (Task::none(), evt);
         }
         (Task::none(), ComponentEvent::Handled)
     }
@@ -128,9 +129,9 @@ impl Component for AIAgent {
         };
         match key {
             Key::Named(Named::Enter) => {
-                // `/app` (bare, no trailing space) + Enter returns to launcher.
-                if let Some((SlashCommand::App, args)) = SlashCommand::detect(&format!("{} ", self.query.trim())) {
-                    return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
+                if let Some(evt) = SlashCommand::as_nav_event(&format!("{} ", self.query.trim())) {
+                    self.query.clear();
+                    return (Task::none(), evt);
                 }
                 self.do_submit(config)
             }

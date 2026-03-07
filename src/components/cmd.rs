@@ -5,7 +5,6 @@ use iced::{
     widget::{button, column, container, mouse_area, row, scrollable, svg, text, Space},
     Alignment, Background, Border, Color, Element, Event, Font, Length, Subscription, Task,
 };
-use std::path::PathBuf;
 use std::time::Duration;
 
 use super::command::{ComponentEvent, SlashCommand};
@@ -46,18 +45,17 @@ fn icon_btn<'a, Msg: Clone + 'a>(
 }
 
 enum PanelState {
-    /// No command run yet — show the list of available sub-commands.
+    /// No command run yet — show the list of configured commands.
     Idle,
-    /// Last command produced a result (success or error).
+    /// Last command produced output (display_result = true).
     Result {
         prompt: String,
         output: String,
-        /// Pre-built copy text (prompt + output joined).
         copy_text: String,
     },
 }
 
-pub struct Settings {
+pub struct Cmd {
     query: String,
     panel: PanelState,
     copy_feedback: bool,
@@ -67,46 +65,14 @@ pub struct Settings {
 #[derive(Debug, Clone)]
 pub enum Msg {
     QueryChanged(String),
-    /// Absorbs mouse clicks on the panel so they don't propagate as Ignored
-    /// (which would close the window).
+    /// Absorbs mouse clicks on the panel so they don't propagate as Ignored.
     PanelClick,
     Copy,
     Copied,
     ShakeTick,
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn themes_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(|h| PathBuf::from(h).join(".config/trebuchet/themes"))
-}
-
-fn list_themes() -> Vec<String> {
-    themes_dir()
-        .and_then(|d| std::fs::read_dir(d).ok())
-        .map(|entries| {
-            let mut names: Vec<String> = entries
-                .filter_map(|e| e.ok())
-                .filter_map(|e| {
-                    let p = e.path();
-                    if p.extension().and_then(|x| x.to_str()) == Some("conf") {
-                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            names.sort();
-            names
-        })
-        .unwrap_or_default()
-}
-
-// ── Settings impl ─────────────────────────────────────────────────────────────
-
-impl Settings {
+impl Cmd {
     pub fn new() -> Self {
         Self {
             query: String::new(),
@@ -118,78 +84,45 @@ impl Settings {
 
     pub fn reset(&mut self) {
         self.query = String::new();
-        self.shake = ShakeState::default();
-        self.copy_feedback = false;
         self.panel = PanelState::Idle;
+        self.copy_feedback = false;
+        self.shake = ShakeState::default();
     }
 
-    /// Parse the current query and execute the matching sub-command.
-    /// Returns a ComponentEvent to propagate upward if the theme was applied.
-    fn execute(&mut self, query: &str) -> ComponentEvent {
+    /// Find and run the command matching `query`. Prefixes are stored without
+    /// the leading slash, so the user types e.g. `ip` not `/ip`.
+    fn execute(&mut self, query: &str, config: &Config) -> ComponentEvent {
         let q = query.trim();
-
-        // ── theme <name> ───────────────────────────────────────────────────────
-        if let Some(raw_name) = q.strip_prefix("theme") {
-            let name = raw_name.trim();
-            if name.is_empty() {
-                // Show theme usage + list
-                let themes = list_themes();
-                let list = if themes.is_empty() {
-                    "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                } else {
-                    themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
+        if let Some(cmd) = config.commands.iter().find(|c| c.prefix == q) {
+            let shell_cmd = cmd.command.clone();
+            if cmd.display_result {
+                let output = match std::process::Command::new("sh")
+                    .args(["-c", &shell_cmd])
+                    .output()
+                {
+                    Ok(o) => {
+                        let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                        if out.is_empty() { "(no output)".to_string() } else { out }
+                    }
+                    Err(e) => format!("Error: {e}"),
                 };
-                let output = format!("Usage: theme <name>\n\nAvailable themes:\n{list}");
                 let copy_text = format!("$ {q}\n{output}");
                 self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
                 self.query.clear();
-                return ComponentEvent::Handled;
+                self.copy_feedback = false;
+                ComponentEvent::Handled
+            } else {
+                let _ = std::process::Command::new("sh").args(["-c", &shell_cmd]).spawn();
+                ComponentEvent::Exit
             }
-
-            let path = themes_dir().map(|d| d.join(format!("{}.conf", name)));
-            match path.and_then(|p| crate::theme::Theme::from_file(&p)) {
-                Some(theme) => {
-                    let output = format!("Theme '{name}' applied.");
-                    let copy_text = format!("$ {q}\n{output}");
-                    self.panel = PanelState::Result {
-                        prompt: q.to_string(),
-                        output,
-                        copy_text,
-                    };
-                    self.query.clear();
-                    self.copy_feedback = false;
-                    return ComponentEvent::ThemeChanged(name.to_string(), theme);
-                }
-                None => {
-                    let themes = list_themes();
-                    let list = if themes.is_empty() {
-                        "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                    } else {
-                        themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
-                    };
-                    let output = format!(
-                        "Theme '{name}' not found.\n\nAvailable themes:\n{list}"
-                    );
-                    let copy_text = format!("$ {q}\n{output}");
-                    self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
-                    self.shake = ShakeState::trigger();
-                    return ComponentEvent::Handled;
-                }
-            }
+        } else {
+            self.shake = ShakeState::trigger();
+            ComponentEvent::Handled
         }
-
-        // ── Unknown sub-command ────────────────────────────────────────────────
-        let output = format!("Unknown command: {q}\n\nAvailable commands:\n  theme <name>    switch the colour theme");
-        let copy_text = format!("$ {q}\n{output}");
-        self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
-        self.shake = ShakeState::trigger();
-        ComponentEvent::Handled
     }
 }
 
-// ── Component impl ────────────────────────────────────────────────────────────
-
-impl Component for Settings {
+impl Component for Cmd {
     type Msg = Msg;
 
     fn handle_event(
@@ -197,7 +130,7 @@ impl Component for Settings {
         event: &Event,
         status: Status,
         _apps: &[AppEntry],
-        _config: &Config,
+        config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
         let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
         else {
@@ -218,7 +151,7 @@ impl Component for Settings {
                     self.query.clear();
                     return (Task::none(), evt);
                 }
-                let evt = self.execute(&q);
+                let evt = self.execute(&q, config);
                 (Task::none(), evt)
             }
 
@@ -291,38 +224,36 @@ impl Component for Settings {
     }
 
     fn view<'a>(&'a self, _apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
-        // ── Panel body ────────────────────────────────────────────────────────
         let (idle_color, text_color, prompt_color) =
             (config.theme.ai_idle, config.theme.terminal_output, config.theme.terminal_prompt);
 
         let body: Element<'a, Msg> = match &self.panel {
             PanelState::Idle => {
-                let themes = list_themes();
-                let theme_list: String = if themes.is_empty() {
-                    "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                } else {
-                    themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
-                };
-                let mut items: Vec<Element<'a, Msg>> = vec![
-                    text("Available commands:").size(13).color(prompt_color).into(),
-                    text("  theme <name>    switch the colour theme")
-                        .font(Font::MONOSPACE)
-                        .size(14)
-                        .color(idle_color)
-                        .into(),
-                    text("").size(6).into(),
-                    text("Available themes:").size(13).color(prompt_color).into(),
-                ];
-                for line in theme_list.lines() {
-                    items.push(
-                        text(line.to_string())
+                if config.commands.is_empty() {
+                    column![
+                        text("No commands configured.").size(13).color(prompt_color),
+                        text("Add [[command]] blocks to ~/.config/trebuchet/trebuchet.conf")
                             .font(Font::MONOSPACE)
-                            .size(14)
-                            .color(idle_color)
-                            .into(),
-                    );
+                            .size(13)
+                            .color(idle_color),
+                    ]
+                    .spacing(6)
+                    .into()
+                } else {
+                    let mut items: Vec<Element<'a, Msg>> = vec![
+                        text("Available commands:").size(13).color(prompt_color).into(),
+                    ];
+                    for cmd in &config.commands {
+                        items.push(
+                            text(format!("  {}", cmd.prefix))
+                                .font(Font::MONOSPACE)
+                                .size(14)
+                                .color(idle_color)
+                                .into(),
+                        );
+                    }
+                    column(items).spacing(6).into()
                 }
-                column(items).spacing(6).into()
             }
             PanelState::Result { prompt, output, .. } => {
                 let prompt_line = text(format!("$ {prompt}"))
@@ -355,7 +286,6 @@ impl Component for Settings {
         )
         .on_press(Msg::PanelClick);
 
-        // ── Action bar (ai_agent style) ───────────────────────────────────────
         let has_result = matches!(self.panel, PanelState::Result { .. });
         let (btn_bg, feedback_color) =
             (config.theme.button_background, config.theme.copy_feedback);

@@ -9,8 +9,8 @@ use iced_layershell::to_layer_message;
 
 use crate::components::ai_agent::{self, AIAgent};
 use crate::components::app_launcher::{self, AppLauncher};
+use crate::components::cmd::{self, Cmd};
 use crate::components::command::{ComponentEvent, SlashCommand};
-use crate::components::command_result::{self, CommandResult};
 use crate::components::component::Component;
 use crate::components::settings::{self, Settings};
 use crate::config::Config;
@@ -23,7 +23,7 @@ use crate::ui::ShakeState;
 pub enum ActiveComponent {
     Launcher,
     Ai,
-    CommandResult,
+    Cmd,
     Settings,
 }
 
@@ -35,7 +35,7 @@ pub struct Trebuchet {
     pub active: ActiveComponent,
     pub launcher: AppLauncher,
     pub ai_agent: AIAgent,
-    pub command_result: CommandResult,
+    pub cmd: Cmd,
     pub settings: Settings,
 }
 
@@ -48,7 +48,7 @@ pub enum Message {
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
-    CommandResult(command_result::Msg),
+    Cmd(cmd::Msg),
     Settings(settings::Msg),
 }
 
@@ -63,7 +63,7 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         active: ActiveComponent::Launcher,
         launcher,
         ai_agent: AIAgent::new(),
-        command_result: CommandResult::new(),
+        cmd: Cmd::new(),
         settings: Settings::new(),
     };
     (state, Task::none())
@@ -110,35 +110,17 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             state.active = ActiveComponent::Settings;
             state.settings.reset();
         }
-        ComponentEvent::CommandInvoked(SlashCommand::Unknown(name), _) => {
-            let prefix = format!("/{}", name);
-            if let Some(cmd) = state.config.commands.iter().find(|c| c.prefix == prefix) {
-                let shell_cmd = cmd.command.clone();
-                if cmd.display_result {
-                    let output = match std::process::Command::new("sh")
-                        .args(["-c", &shell_cmd])
-                        .output()
-                    {
-                        Ok(o) => {
-                            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            if out.is_empty() { "(no output)".to_string() } else { out }
-                        }
-                        Err(e) => format!("Error: {e}"),
-                    };
-                    state.active = ActiveComponent::CommandResult;
-                    state.command_result.show(prefix, output);
-                } else {
-                    let _ = std::process::Command::new("sh")
-                        .args(["-c", &shell_cmd])
-                        .spawn();
-                    std::process::exit(0);
-                }
-            } else {
-                state.launcher.shake = ShakeState::trigger();
-                state.launcher.query.clear();
-                let apps = state.apps.clone();
-                state.launcher.apply_filter(&apps, "");
-            }
+        ComponentEvent::CommandInvoked(SlashCommand::Cmd, _) => {
+            state.active = ActiveComponent::Cmd;
+            state.cmd.reset();
+        }
+        ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {
+            // Unknown slash commands from the launcher just shake — custom
+            // commands are accessed via /cmd, not directly from the launcher.
+            state.launcher.shake = ShakeState::trigger();
+            state.launcher.query.clear();
+            let apps = state.apps.clone();
+            state.launcher.apply_filter(&apps, "");
         }
     }
 }
@@ -159,10 +141,10 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             apply_event(state, evt);
             return task.map(Message::Ai);
         }
-        Message::CommandResult(m) => {
-            let (task, evt) = state.command_result.update(m, &state.apps, &state.config);
+        Message::Cmd(m) => {
+            let (task, evt) = state.cmd.update(m, &state.apps, &state.config);
             apply_event(state, evt);
-            return task.map(Message::CommandResult);
+            return task.map(Message::Cmd);
         }
         Message::Settings(m) => {
             let (task, evt) = state.settings.update(m, &state.apps, &state.config);
@@ -180,9 +162,9 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                     let (t, e) = state.ai_agent.handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Ai), e)
                 }
-                ActiveComponent::CommandResult => {
-                    let (t, e) = state.command_result.handle_event(&event, status, &state.apps, &state.config);
-                    (t.map(Message::CommandResult), e)
+                ActiveComponent::Cmd => {
+                    let (t, e) = state.cmd.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::Cmd), e)
                 }
                 ActiveComponent::Settings => {
                     let (t, e) = state.settings.handle_event(&event, status, &state.apps, &state.config);
@@ -209,8 +191,8 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         ActiveComponent::Ai => {
             state.ai_agent.view(&state.apps, &state.config).map(Message::Ai)
         }
-        ActiveComponent::CommandResult => {
-            state.command_result.view(&state.apps, &state.config).map(Message::CommandResult)
+        ActiveComponent::Cmd => {
+            state.cmd.view(&state.apps, &state.config).map(Message::Cmd)
         }
         ActiveComponent::Settings => {
             state.settings.view(&state.apps, &state.config).map(Message::Settings)
@@ -249,7 +231,7 @@ pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
     let component = match state.active {
         ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
         ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
-        ActiveComponent::CommandResult => state.command_result.subscription().map(Message::CommandResult),
+        ActiveComponent::Cmd => state.cmd.subscription().map(Message::Cmd),
         ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
     };
     Subscription::batch([events, component])

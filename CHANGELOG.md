@@ -5,17 +5,24 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `/cmd` command runner: type `/cmd` (+ space or Enter) to open a dedicated terminal-style panel for running configured shell commands; type a prefix and press Enter to trigger it; ESC returns to the launcher
+- `/config` panel now lists available themes at idle — no sub-command needed to see them
 - Model picker at the bottom-left of the AI panel: switch between configured models mid-session without touching the config
 - `[[ai_model]]` config block with comma-separated `model` field — one block per provider, one entry per model in the picker (e.g. `model = claude-sonnet-4-6, claude-opus-4-6`)
 - Picker labels are auto-generated as `provider:model` (e.g. `anthropic:claude-sonnet-4-6`)
 - Multiple `[[ai_model]]` blocks supported; the first model of the first block is the default
 
 ### Changed
+- Custom command prefixes in `trebuchet.conf` no longer need a leading `/`; existing configs with `/prefix` continue to work (the slash is silently stripped on load)
+- Navigation slash commands (`/ai`, `/app`, `/config`, `/cmd`) can be triggered with Space or Enter from within any panel, not just the launcher
+- Unknown slash commands typed in any panel now shake the search bar instead of silently clearing
 - AI config restructured: four flat keys (`ai_provider`, `ai_api_key`, `ai_model`, `ai_base_url`) replaced by `[[ai_model]]` blocks; flat keys still work as a single-model shorthand for backward compatibility
 - `install.sh`: all interactive prompts (icons update, config overwrite, AI setup wizard) are now gathered upfront before the build starts, so the installation runs unattended once questions are answered
 - `fetch-icons.sh`: added `FETCH_AS` alias map so icon save-name can differ from the Papirus/Simple-Icons lookup name; removed unavailable icons (cohere, xai, orca-slicer, pamac-manager)
 - Search bar placeholder text is now mode-aware: "Search apps..." in launcher mode, "Ask anything..." in AI mode, empty in terminal/command mode
-- Command execution moved from `AppLauncher` into `app.rs` `apply_event`; launcher now only detects slash prefixes and forwards `ComponentEvent::CommandInvoked` — no more duplicated `sh -c` blocks across three code paths
+
+### Removed
+- Direct slash-command execution from the launcher search bar; custom commands are now accessed through the `/cmd` panel
 
 ## [0.2.0] - 2026-03-04
 
