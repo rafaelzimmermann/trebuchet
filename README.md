@@ -4,7 +4,9 @@ An application launcher for Hyprland/Wayland.
 
 Built with [iced](https://github.com/iced-rs/iced) and [iced-layershell](https://github.com/waycrate/exwlseat).
 
-https://github.com/user-attachments/assets/3a6caffb-aa08-4783-8f2a-d0f1bb18a015
+
+https://github.com/user-attachments/assets/117d5e0b-9064-4bc3-b002-a6ce9533ec2c
+
 
 
 ## Features
