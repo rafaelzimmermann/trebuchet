@@ -21,6 +21,12 @@ All notable changes to this project will be documented in this file.
 - `fetch-icons.sh`: added `FETCH_AS` alias map so icon save-name can differ from the Papirus/Simple-Icons lookup name; removed unavailable icons (cohere, xai, orca-slicer, pamac-manager)
 - Search bar placeholder text is now mode-aware: "Search apps..." in launcher mode, "Ask anything..." in AI mode, empty in terminal/command mode
 
+### Fixed
+- `/cmd` commands with `display_result = true` no longer freeze the launcher while running; the panel immediately shows a "Running…" indicator and remains fully interactive until the result arrives
+
+### Performance
+- `/config` panel opens faster; the installed theme list is now read from disk once when the panel opens instead of on every render frame
+
 ### Removed
 - Direct slash-command execution from the launcher search bar; custom commands are now accessed through the `/cmd` panel
 
