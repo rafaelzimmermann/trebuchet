@@ -14,6 +14,7 @@ use crate::components::command_result::{self, CommandResult};
 use crate::components::component::Component;
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
+use crate::ui::ShakeState;
 
 // ── Active component ──────────────────────────────────────────────────────────
 
@@ -84,10 +85,35 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             let apps = state.apps.clone();
             state.launcher.reset(&apps);
         }
-        ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
-        ComponentEvent::ShowCommandResult { prefix, output } => {
-            state.active = ActiveComponent::CommandResult;
-            state.command_result.show(prefix, output);
+        ComponentEvent::CommandInvoked(SlashCommand::Unknown(name), _) => {
+            let prefix = format!("/{}", name);
+            if let Some(cmd) = state.config.commands.iter().find(|c| c.prefix == prefix) {
+                let shell_cmd = cmd.command.clone();
+                if cmd.display_result {
+                    let output = match std::process::Command::new("sh")
+                        .args(["-c", &shell_cmd])
+                        .output()
+                    {
+                        Ok(o) => {
+                            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            if out.is_empty() { "(no output)".to_string() } else { out }
+                        }
+                        Err(e) => format!("Error: {e}"),
+                    };
+                    state.active = ActiveComponent::CommandResult;
+                    state.command_result.show(prefix, output);
+                } else {
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &shell_cmd])
+                        .spawn();
+                    std::process::exit(0);
+                }
+            } else {
+                state.launcher.shake = ShakeState::trigger();
+                state.launcher.query.clear();
+                let apps = state.apps.clone();
+                state.launcher.apply_filter(&apps, "");
+            }
         }
     }
 }

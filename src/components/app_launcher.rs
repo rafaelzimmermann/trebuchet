@@ -88,47 +88,13 @@ impl AppLauncher {
         &mut self,
         c: String,
         apps: &[AppEntry],
-        config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
         self.query.push_str(&c);
 
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
-            match cmd {
-                SlashCommand::Ai => {
-                    return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args));
-                }
-                SlashCommand::App => {
-                    return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
-                }
-                SlashCommand::Unknown(ref name) => {
-                    let prefix = format!("/{}", name);
-                    if let Some(cmd) = config.commands.iter().find(|c| c.prefix == prefix) {
-                        let shell_cmd = cmd.command.clone();
-                        if cmd.display_result {
-                            let output = match std::process::Command::new("sh")
-                                .args(["-c", &shell_cmd])
-                                .output()
-                            {
-                                Ok(o) => {
-                                    let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                                    if out.is_empty() { "(no output)".to_string() } else { out }
-                                }
-                                Err(e) => format!("Error: {e}"),
-                            };
-                            return (Task::none(), ComponentEvent::ShowCommandResult { prefix, output });
-                        } else {
-                            let _ = std::process::Command::new("sh")
-                                .args(["-c", &shell_cmd])
-                                .spawn();
-                            return (Task::none(), ComponentEvent::Exit);
-                        }
-                    }
-                    self.shake = ShakeState::trigger();
-                    self.query.clear();
-                    self.apply_filter(apps, "");
-                    return (Task::none(), ComponentEvent::Handled);
-                }
-            }
+            self.query.clear();
+            self.apply_filter(apps, "");
+            return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
         }
 
         let q = self.query.clone();
@@ -195,43 +161,14 @@ impl Component for AppLauncher {
         };
         match key {
             Key::Named(Named::Enter) => {
-                // 1. Custom commands — exact prefix match takes priority.
+                // Slash command (bare `/cmd` + Enter treated same as `/cmd ` + Space).
                 let trimmed = self.query.trim().to_string();
-                if let Some(cmd) = config.commands.iter().find(|c| c.prefix == trimmed) {
-                    let shell_cmd = cmd.command.clone();
-                    if cmd.display_result {
-                        let output = match std::process::Command::new("sh")
-                            .args(["-c", &shell_cmd])
-                            .output()
-                        {
-                            Ok(o) => {
-                                let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                                if out.is_empty() { "(no output)".to_string() } else { out }
-                            }
-                            Err(e) => format!("Error: {e}"),
-                        };
-                        return (Task::none(), ComponentEvent::ShowCommandResult { prefix: trimmed.clone(), output });
-                    } else {
-                        let _ = std::process::Command::new("sh").args(["-c", &shell_cmd]).spawn();
-                        return (Task::none(), ComponentEvent::Exit);
-                    }
-                }
-
-                // 2. Bare slash command (e.g. `/ai` without trailing space) switches mode.
                 if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
-                    return match cmd {
-                        SlashCommand::Ai => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args)),
-                        SlashCommand::App => (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args)),
-                        SlashCommand::Unknown(_) => {
-                            self.shake = ShakeState::trigger();
-                            self.query.clear();
-                            self.apply_filter(apps, "");
-                            (Task::none(), ComponentEvent::Handled)
-                        }
-                    };
+                    self.query.clear();
+                    self.apply_filter(apps, "");
+                    return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
                 }
-
-                // 3. Launch the selected app.
+                // Launch the selected app.
                 self.handle_submit(apps, config)
             }
             Key::Named(Named::Escape) => (Task::none(), ComponentEvent::Exit),
@@ -257,7 +194,7 @@ impl Component for AppLauncher {
                 self.handle_backspace(apps, config)
             }
             Key::Named(Named::Space) if status == Status::Ignored => {
-                self.handle_char(" ".to_string(), apps, config)
+                self.handle_char(" ".to_string(), apps)
             }
             Key::Character(_)
                 if status == Status::Ignored
@@ -266,7 +203,7 @@ impl Component for AppLauncher {
                     && !modifiers.logo() =>
             {
                 if let Some(t) = text.as_ref() {
-                    self.handle_char(t.to_string(), apps, config)
+                    self.handle_char(t.to_string(), apps)
                 } else {
                     (Task::none(), ComponentEvent::Handled)
                 }
@@ -279,44 +216,9 @@ impl Component for AppLauncher {
         match msg {
             Msg::QueryChanged(s) => {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
-                    match cmd {
-                        SlashCommand::Ai => {
-                            self.query = String::new();
-                            return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::Ai, args));
-                        }
-                        SlashCommand::App => {
-                            self.query = String::new();
-                            return (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, args));
-                        }
-                        SlashCommand::Unknown(ref name) => {
-                            let prefix = format!("/{}", name);
-                            if let Some(cmd) = config.commands.iter().find(|c| c.prefix == prefix) {
-                                let shell_cmd = cmd.command.clone();
-                                if cmd.display_result {
-                                    let output = match std::process::Command::new("sh")
-                                        .args(["-c", &shell_cmd])
-                                        .output()
-                                    {
-                                        Ok(o) => {
-                                            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                                            if out.is_empty() { "(no output)".to_string() } else { out }
-                                        }
-                                        Err(e) => format!("Error: {e}"),
-                                    };
-                                    return (Task::none(), ComponentEvent::ShowCommandResult { prefix, output });
-                                } else {
-                                    let _ = std::process::Command::new("sh")
-                                        .args(["-c", &shell_cmd])
-                                        .spawn();
-                                    return (Task::none(), ComponentEvent::Exit);
-                                }
-                            }
-                            self.shake = ShakeState::trigger();
-                            self.query = String::new();
-                            self.apply_filter(apps, "");
-                            return (Task::none(), ComponentEvent::Handled);
-                        }
-                    }
+                    self.query = String::new();
+                    self.apply_filter(apps, "");
+                    return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
                 }
                 self.apply_filter(apps, &s);
                 self.query = s;

@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - `install.sh`: all interactive prompts (icons update, config overwrite, AI setup wizard) are now gathered upfront before the build starts, so the installation runs unattended once questions are answered
 - `fetch-icons.sh`: added `FETCH_AS` alias map so icon save-name can differ from the Papirus/Simple-Icons lookup name; removed unavailable icons (cohere, xai, orca-slicer, pamac-manager)
 - Search bar placeholder text is now mode-aware: "Search apps..." in launcher mode, "Ask anything..." in AI mode, empty in terminal/command mode
+- Command execution moved from `AppLauncher` into `app.rs` `apply_event`; launcher now only detects slash prefixes and forwards `ComponentEvent::CommandInvoked` — no more duplicated `sh -c` blocks across three code paths
 
 ## [0.2.0] - 2026-03-04
 

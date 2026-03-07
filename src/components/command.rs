@@ -30,5 +30,4 @@ pub enum ComponentEvent {
     Handled,
     Exit,
     CommandInvoked(SlashCommand, String), // command + remaining args
-    ShowCommandResult { prefix: String, output: String }, // captured stdout to display
 }
