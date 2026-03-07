@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-07
+
+### Fixed
+- Clicking inside any panel (on text, spacing, or disabled buttons) no longer closes the launcher; a single `mouse_area` in `app.rs` absorbs all content-area clicks
+- Disabled Copy / Retry buttons (when there is no result yet) no longer leak `Status::Ignored` and accidentally close the launcher; icon buttons always register `on_press`
+- Clicking in the window margins (outside the content area) correctly closes the launcher
+
+### Changed
+- Shared `PANEL_PADDING` constant (`top: 24, bottom: 24, left: 80, right: 80`) defined once in `src/ui` and applied by each component, replacing four identical inline literals
+
 ## [0.3.0] - 2026-03-07
 
 ### Added

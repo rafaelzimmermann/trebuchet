@@ -12,7 +12,7 @@ use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
 use crate::ui::panel::{icon_btn, PanelState, COPY_ICON};
-use crate::ui::{search_bar, SearchIcon, ShakeState};
+use crate::ui::{search_bar, SearchIcon, ShakeState, PANEL_PADDING};
 
 pub struct Cmd {
     query: String,
@@ -24,8 +24,6 @@ pub struct Cmd {
 #[derive(Debug, Clone)]
 pub enum Msg {
     QueryChanged(String),
-    /// Absorbs mouse clicks on the panel so they don't propagate as Ignored.
-    PanelClick,
     Copy,
     Copied,
     ShakeTick,
@@ -163,7 +161,6 @@ impl Component for Cmd {
             Msg::QueryChanged(s) => {
                 self.query = s;
             }
-            Msg::PanelClick => {}
             Msg::Copy => {
                 let text_to_copy = match &self.panel {
                     PanelState::Result { copy_text, .. } => copy_text.clone(),
@@ -298,7 +295,7 @@ impl Component for Cmd {
             .width(Length::Fill)
             .height(Length::Fill),
         )
-        .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
+        .padding(PANEL_PADDING)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -467,12 +464,4 @@ mod tests {
         assert!(!c.copy_feedback);
     }
 
-    #[test]
-    fn update_panel_click_is_noop() {
-        let mut c = Cmd::new();
-        let apps: Vec<AppEntry> = vec![];
-        let (task, evt) = c.update(Msg::PanelClick, &apps, &Config::default());
-        assert_eq!(evt, ComponentEvent::Handled);
-        let _ = task;
-    }
 }

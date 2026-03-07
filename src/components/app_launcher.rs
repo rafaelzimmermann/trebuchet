@@ -13,7 +13,7 @@ use super::command::{ComponentEvent, SlashCommand};
 use super::component::Component;
 use crate::config::Config;
 use crate::launcher::{launch_app, AppEntry};
-use crate::ui::{app_grid, search_bar, SearchIcon, ShakeState};
+use crate::ui::{app_grid, search_bar, SearchIcon, ShakeState, PANEL_PADDING};
 
 pub struct AppLauncher {
     pub query: String,
@@ -282,17 +282,20 @@ impl Component for AppLauncher {
             if s >= start && s < end { Some(s - start) } else { None }
         });
 
-        let content = column![
-            search_bar(&self.query, &self.shake, SearchIcon::Search, &config.theme, Msg::QueryChanged),
-            app_grid(apps, page_slice, config, highlighted, Msg::AppActivated),
-            pagination,
-        ]
-        .spacing(16)
-        .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
+        container(
+            column![
+                search_bar(&self.query, &self.shake, SearchIcon::Search, &config.theme, Msg::QueryChanged),
+                app_grid(apps, page_slice, config, highlighted, Msg::AppActivated),
+                pagination,
+            ]
+            .spacing(16)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
+        .padding(PANEL_PADDING)
         .width(Length::Fill)
-        .height(Length::Fill);
-
-        content.into()
+        .height(Length::Fill)
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Msg> {

@@ -13,7 +13,7 @@ use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
 use crate::ui::panel::{icon_btn, PanelState, COPY_ICON};
-use crate::ui::{search_bar, SearchIcon, ShakeState};
+use crate::ui::{search_bar, SearchIcon, ShakeState, PANEL_PADDING};
 
 pub struct Settings {
     query: String,
@@ -326,7 +326,7 @@ impl Component for Settings {
             .width(Length::Fill)
             .height(Length::Fill),
         )
-        .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
+        .padding(PANEL_PADDING)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

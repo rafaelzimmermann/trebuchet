@@ -196,27 +196,27 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     };
 
     let bg = state.config.theme.background;
-    mouse_area(
-        container(content)
-            .padding([0, 0])
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_theme| container::Style {
-                background: Some(Background::Color(bg)),
-                border: Border { radius: 16.0.into(), ..Default::default() },
-                ..Default::default()
-            }),
-    )
-    .on_press(Message::Absorb)
-    .into()
+    container(mouse_area(content).on_press(Message::Absorb))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border { radius: 16.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .into()
 }
 
 // ── Event handler ─────────────────────────────────────────────────────────────
 
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match &event {
-        // Close when the cursor leaves the window (click outside on Wayland).
         Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Close),
+        // Margin clicks (outside the content area but inside the window) produce
+        // Status::Ignored because the mouse_area in view() only wraps the content.
+        Event::Mouse(mouse::Event::ButtonPressed(_)) if status == Status::Ignored => {
+            Some(Message::Close)
+        }
         Event::Keyboard(_) => Some(Message::IcedEvent(event, status)),
         _ => None,
     }
@@ -238,12 +238,22 @@ mod tests {
     }
 
     #[test]
-    fn click_inside_does_not_close() {
-        // All clicks inside the window are absorbed by the top-level mouse_area
-        // in view(); on_event no longer maps ButtonPressed to Close.
+    fn margin_click_closes_launcher() {
+        // Status::Ignored means the click landed in the padding margin, not the content.
         let result = on_event(
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
             Status::Ignored,
+            iced::window::Id::unique(),
+        );
+        assert!(matches!(result, Some(Message::Close)));
+    }
+
+    #[test]
+    fn captured_click_does_not_close() {
+        // Status::Captured means a widget (or the content mouse_area) handled the click.
+        let result = on_event(
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Status::Captured,
             iced::window::Id::unique(),
         );
         assert!(result.is_none());

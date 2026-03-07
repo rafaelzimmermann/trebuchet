@@ -1,7 +1,7 @@
 use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
-    widget::{container, markdown},
+    widget::markdown,
     time,
     Element, Event, Length, Subscription, Task,
 };
@@ -12,7 +12,7 @@ use super::command::{ComponentEvent, SlashCommand};
 use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
-use crate::ui::{ai_panel, search_bar, SearchIcon, ShakeState};
+use crate::ui::{ai_panel, search_bar, SearchIcon, ShakeState, PANEL_PADDING};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AiStatus {
@@ -223,7 +223,7 @@ impl Component for AIAgent {
         let model_labels: Vec<String> = config.ai_models.iter().map(|m| m.label.clone()).collect();
         let selected_label = model_labels.get(self.selected_model).cloned();
 
-        container(
+        iced::widget::container(
             iced::widget::column![
                 search_bar(&self.query, &self.shake, SearchIcon::Robot, &config.theme, Msg::QueryChanged),
                 ai_panel(
@@ -244,7 +244,7 @@ impl Component for AIAgent {
             .width(Length::Fill)
             .height(Length::Fill),
         )
-        .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
+        .padding(PANEL_PADDING)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
