@@ -67,7 +67,7 @@ impl Config {
         {
             cfg = Self::parse(cfg, &content);
         }
-        // Apply the last-selected theme (written by /theme <name>).
+        // Apply the last-selected theme (written by the 'theme <name>' settings command).
         if let Some(name) = config_path("current-theme")
             .and_then(|p| std::fs::read_to_string(p).ok())
         {
