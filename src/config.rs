@@ -123,7 +123,7 @@ impl Config {
                            api_key: &mut Option<String>,
                            model: &mut Option<String>,
                            base_url: &mut Option<String>| {
-            let prov = std::mem::replace(provider, AiProvider::default());
+            let prov = std::mem::take(provider);
             let key  = std::mem::take(api_key);
             let url  = std::mem::take(base_url);
             let models: Vec<Option<String>> = match std::mem::take(model) {

@@ -2,8 +2,8 @@ use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
     time,
-    widget::{button, column, container, mouse_area, row, scrollable, svg, text, Space},
-    Alignment, Background, Border, Color, Element, Event, Font, Length, Subscription, Task,
+    widget::{column, container, mouse_area, row, scrollable, text, Space},
+    Alignment, Background, Border, Element, Event, Font, Length, Subscription, Task,
 };
 use std::time::Duration;
 
@@ -11,49 +11,8 @@ use super::command::{ComponentEvent, SlashCommand};
 use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
+use crate::ui::panel::{icon_btn, PanelState, COPY_ICON};
 use crate::ui::{search_bar, SearchIcon, ShakeState};
-
-const COPY_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="9" y="9" width="13" height="13" rx="2"/>
-  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-</svg>"#;
-
-fn icon_btn<'a, Msg: Clone + 'a>(
-    icon_bytes: &'static [u8],
-    msg: Msg,
-    enabled: bool,
-    btn_bg: Color,
-) -> iced::widget::Button<'a, Msg> {
-    let icon_color = Color { a: if enabled { 1.0 } else { 0.35 }, ..Color::WHITE };
-    let bg = Color { a: if enabled { btn_bg.a } else { btn_bg.a * 0.4 }, ..btn_bg };
-    let icon = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
-        .width(16)
-        .height(16)
-        .style(move |_theme, _status| svg::Style { color: Some(icon_color) });
-    let mut btn = button(icon)
-        .padding(8)
-        .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(bg)),
-            border: Border { radius: 6.0.into(), ..Default::default() },
-            ..Default::default()
-        });
-    if enabled {
-        btn = btn.on_press(msg);
-    }
-    btn
-}
-
-enum PanelState {
-    /// No command run yet — show the list of configured commands.
-    Idle,
-    /// Last command produced output (display_result = true).
-    Result {
-        prompt: String,
-        output: String,
-        copy_text: String,
-    },
-}
 
 pub struct Cmd {
     query: String,
@@ -70,6 +29,8 @@ pub enum Msg {
     Copy,
     Copied,
     ShakeTick,
+    /// Delivered when an async `display_result` command finishes.
+    CommandOutput(Result<String, String>),
 }
 
 impl Cmd {
@@ -89,35 +50,43 @@ impl Cmd {
         self.shake = ShakeState::default();
     }
 
-    /// Find and run the command matching `query`. Prefixes are stored without
-    /// the leading slash, so the user types e.g. `ip` not `/ip`.
-    fn execute(&mut self, query: &str, config: &Config) -> ComponentEvent {
+    /// Find and run the command matching `query`.
+    ///
+    /// * `display_result = true` — transitions to `Running`, launches an async
+    ///   subprocess via `tokio::process`; result arrives as `Msg::CommandOutput`.
+    /// * `display_result = false` — spawns-and-forgets, returns `Exit` immediately.
+    fn execute(&mut self, query: &str, config: &Config) -> (Task<Msg>, ComponentEvent) {
         let q = query.trim();
         if let Some(cmd) = config.commands.iter().find(|c| c.prefix == q) {
             let shell_cmd = cmd.command.clone();
             if cmd.display_result {
-                let output = match std::process::Command::new("sh")
-                    .args(["-c", &shell_cmd])
-                    .output()
-                {
-                    Ok(o) => {
-                        let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                        if out.is_empty() { "(no output)".to_string() } else { out }
-                    }
-                    Err(e) => format!("Error: {e}"),
-                };
-                let copy_text = format!("$ {q}\n{output}");
-                self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
+                self.panel = PanelState::Running { prompt: q.to_string() };
                 self.query.clear();
                 self.copy_feedback = false;
-                ComponentEvent::Handled
+                let task = Task::perform(
+                    async move {
+                        match tokio::process::Command::new("sh")
+                            .args(["-c", &shell_cmd])
+                            .output()
+                            .await
+                        {
+                            Ok(o) => {
+                                let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                if out.is_empty() { Ok("(no output)".to_string()) } else { Ok(out) }
+                            }
+                            Err(e) => Err(format!("Error: {e}")),
+                        }
+                    },
+                    Msg::CommandOutput,
+                );
+                (task, ComponentEvent::Handled)
             } else {
                 let _ = std::process::Command::new("sh").args(["-c", &shell_cmd]).spawn();
-                ComponentEvent::Exit
+                (Task::none(), ComponentEvent::Exit)
             }
         } else {
             self.shake = ShakeState::trigger();
-            ComponentEvent::Handled
+            (Task::none(), ComponentEvent::Handled)
         }
     }
 }
@@ -151,8 +120,7 @@ impl Component for Cmd {
                     self.query.clear();
                     return (Task::none(), evt);
                 }
-                let evt = self.execute(&q, config);
-                (Task::none(), evt)
+                self.execute(&q, config)
             }
 
             Key::Named(Named::Backspace) if status == Status::Ignored => {
@@ -199,7 +167,7 @@ impl Component for Cmd {
             Msg::Copy => {
                 let text_to_copy = match &self.panel {
                     PanelState::Result { copy_text, .. } => copy_text.clone(),
-                    PanelState::Idle => String::new(),
+                    _ => String::new(),
                 };
                 if !text_to_copy.is_empty() {
                     let _ = std::process::Command::new("wl-copy").arg(&text_to_copy).spawn();
@@ -218,6 +186,17 @@ impl Component for Cmd {
             }
             Msg::ShakeTick => {
                 self.shake.advance();
+            }
+            Msg::CommandOutput(result) => {
+                let prompt = if let PanelState::Running { prompt } = &self.panel {
+                    prompt.clone()
+                } else {
+                    String::new()
+                };
+                let output = result.unwrap_or_else(|e| e);
+                let copy_text = format!("$ {prompt}\n{output}");
+                self.panel = PanelState::Result { prompt, output, copy_text };
+                return (Task::none(), ComponentEvent::Handled);
             }
         }
         (Task::none(), ComponentEvent::Handled)
@@ -254,6 +233,14 @@ impl Component for Cmd {
                     }
                     column(items).spacing(6).into()
                 }
+            }
+            PanelState::Running { prompt } => {
+                column![
+                    text(format!("$ {prompt}")).font(Font::MONOSPACE).size(14).color(prompt_color),
+                    text("Running\u{2026}").font(Font::MONOSPACE).size(14).color(idle_color),
+                ]
+                .spacing(6)
+                .into()
             }
             PanelState::Result { prompt, output, .. } => {
                 let prompt_line = text(format!("$ {prompt}"))
@@ -329,6 +316,7 @@ impl Component for Cmd {
 mod tests {
     use super::*;
     use crate::config::{Config, CustomCommand};
+    use crate::ui::panel::PanelState;
 
     fn config_with(cmds: Vec<CustomCommand>) -> Config {
         Config { commands: cmds, ..Config::default() }
@@ -373,36 +361,26 @@ mod tests {
     #[test]
     fn execute_no_match_returns_handled() {
         let mut c = Cmd::new();
-        let evt = c.execute("unknown", &config_with(vec![]));
+        let (_, evt) = c.execute("unknown", &config_with(vec![]));
         assert_eq!(evt, ComponentEvent::Handled);
     }
 
     #[test]
-    fn execute_display_result_shows_output() {
+    fn execute_display_result_transitions_to_running() {
         let mut c = Cmd::new();
+        c.query = "hi".to_string();
         let cfg = config_with(vec![display_cmd("hi", "echo hello")]);
-        let evt = c.execute("hi", &cfg);
+        let (_, evt) = c.execute("hi", &cfg);
         assert_eq!(evt, ComponentEvent::Handled);
-        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output.contains("hello")));
-        assert!(c.query.is_empty(), "query should be cleared after execute");
-    }
-
-    #[test]
-    fn execute_display_result_empty_stdout_shows_placeholder() {
-        let mut c = Cmd::new();
-        // `true` exits 0 but produces no stdout.
-        let cfg = config_with(vec![display_cmd("noop", "true")]);
-        let evt = c.execute("noop", &cfg);
-        assert_eq!(evt, ComponentEvent::Handled);
-        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output == "(no output)"));
+        assert!(matches!(&c.panel, PanelState::Running { prompt } if prompt == "hi"));
+        assert!(c.query.is_empty(), "query should be cleared on execute");
     }
 
     #[test]
     fn execute_silent_returns_exit() {
         let mut c = Cmd::new();
-        // Use `true` — exits 0, no output; spawn() won't block.
         let cfg = config_with(vec![silent_cmd("noop", "true")]);
-        let evt = c.execute("noop", &cfg);
+        let (_, evt) = c.execute("noop", &cfg);
         assert_eq!(evt, ComponentEvent::Exit);
     }
 
@@ -410,37 +388,66 @@ mod tests {
     fn execute_trims_query_whitespace() {
         let mut c = Cmd::new();
         let cfg = config_with(vec![display_cmd("ip", "echo 1.2.3.4")]);
-        let evt = c.execute("  ip  ", &cfg);
+        let (_, evt) = c.execute("  ip  ", &cfg);
         assert_eq!(evt, ComponentEvent::Handled);
-        assert!(matches!(c.panel, PanelState::Result { .. }));
+        assert!(matches!(c.panel, PanelState::Running { .. }));
+    }
+
+    // ── Msg::CommandOutput (async completion) ─────────────────────────────────
+
+    #[test]
+    fn command_output_ok_sets_result_panel() {
+        let mut c = Cmd::new();
+        c.panel = PanelState::Running { prompt: "hi".to_string() };
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = c.update(Msg::CommandOutput(Ok("hello".to_string())), &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output == "hello"));
     }
 
     #[test]
-    fn execute_failed_command_shows_error() {
+    fn command_output_empty_shows_no_output_placeholder() {
         let mut c = Cmd::new();
-        // Command that does not exist.
-        let cfg = config_with(vec![display_cmd("oops", "this_binary_does_not_exist_xyz")]);
-        let evt = c.execute("oops", &cfg);
-        // Either shows output (exit-code error message) or handles gracefully.
-        assert_eq!(evt, ComponentEvent::Handled);
+        c.panel = PanelState::Running { prompt: "noop".to_string() };
+        let apps: Vec<AppEntry> = vec![];
+        let (_, _) = c.update(Msg::CommandOutput(Ok("(no output)".to_string())), &apps, &Config::default());
+        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output == "(no output)"));
     }
 
-    // ── Cmd::update ───────────────────────────────────────────────────────────
+    #[test]
+    fn command_output_err_shows_error_string() {
+        let mut c = Cmd::new();
+        c.panel = PanelState::Running { prompt: "oops".to_string() };
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = c.update(Msg::CommandOutput(Err("Error: no such file".to_string())), &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output.contains("Error")));
+    }
+
+    #[test]
+    fn command_output_preserves_prompt_from_running_state() {
+        let mut c = Cmd::new();
+        c.panel = PanelState::Running { prompt: "mycommand".to_string() };
+        let apps: Vec<AppEntry> = vec![];
+        let _ = c.update(Msg::CommandOutput(Ok("done".to_string())), &apps, &Config::default());
+        assert!(matches!(&c.panel, PanelState::Result { prompt, .. } if prompt == "mycommand"));
+    }
+
+    // ── Cmd::update misc ──────────────────────────────────────────────────────
 
     #[test]
     fn update_copied_clears_feedback() {
         let mut c = Cmd::new();
         c.copy_feedback = true;
-        let apps: Vec<crate::launcher::AppEntry> = vec![];
-        let cfg = Config::default();
-        let _ = c.update(Msg::Copied, &apps, &cfg);
+        let apps: Vec<AppEntry> = vec![];
+        let _ = c.update(Msg::Copied, &apps, &Config::default());
         assert!(!c.copy_feedback);
     }
 
     #[test]
     fn update_panel_click_is_noop() {
         let mut c = Cmd::new();
-        let apps: Vec<crate::launcher::AppEntry> = vec![];
+        let apps: Vec<AppEntry> = vec![];
         let (task, evt) = c.update(Msg::PanelClick, &apps, &Config::default());
         assert_eq!(evt, ComponentEvent::Handled);
         let _ = task;

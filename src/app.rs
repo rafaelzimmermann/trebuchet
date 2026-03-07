@@ -91,7 +91,7 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
         ComponentEvent::Exit => std::process::exit(0),
 
         ComponentEvent::ThemeChanged(name, theme) => {
-            state.config.theme = theme;
+            state.config.theme = *theme;
             persist_theme(&name);
         }
 

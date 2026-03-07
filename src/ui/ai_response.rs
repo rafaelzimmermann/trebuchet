@@ -63,6 +63,7 @@ fn md_settings(theme: &Theme) -> markdown::Settings {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn ai_panel<'a, Msg: Clone + 'a>(
     status: &'a AiStatus,
     prompt: &str,

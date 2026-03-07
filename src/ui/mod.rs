@@ -1,4 +1,5 @@
 mod grid;
+pub mod panel;
 mod search;
 pub mod ai_response;
 

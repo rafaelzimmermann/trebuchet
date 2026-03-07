@@ -47,7 +47,7 @@ pub enum ComponentEvent {
     Handled,
     Exit,
     CommandInvoked(SlashCommand, String), // command + remaining args
-    ThemeChanged(String, crate::theme::Theme), // (name, theme) — settings emits this
+    ThemeChanged(String, Box<crate::theme::Theme>), // (name, theme) — settings emits this
 }
 
 #[cfg(test)]

@@ -2,8 +2,8 @@ use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
     time,
-    widget::{button, column, container, mouse_area, row, scrollable, svg, text, Space},
-    Alignment, Background, Border, Color, Element, Event, Font, Length, Subscription, Task,
+    widget::{column, container, mouse_area, row, scrollable, text, Space},
+    Alignment, Background, Border, Element, Event, Font, Length, Subscription, Task,
 };
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,56 +12,16 @@ use super::command::{ComponentEvent, SlashCommand};
 use super::component::Component;
 use crate::config::Config;
 use crate::launcher::AppEntry;
+use crate::ui::panel::{icon_btn, PanelState, COPY_ICON};
 use crate::ui::{search_bar, SearchIcon, ShakeState};
-
-const COPY_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="9" y="9" width="13" height="13" rx="2"/>
-  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-</svg>"#;
-
-fn icon_btn<'a, Msg: Clone + 'a>(
-    icon_bytes: &'static [u8],
-    msg: Msg,
-    enabled: bool,
-    btn_bg: Color,
-) -> iced::widget::Button<'a, Msg> {
-    let icon_color = Color { a: if enabled { 1.0 } else { 0.35 }, ..Color::WHITE };
-    let bg = Color { a: if enabled { btn_bg.a } else { btn_bg.a * 0.4 }, ..btn_bg };
-    let icon = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
-        .width(16)
-        .height(16)
-        .style(move |_theme, _status| svg::Style { color: Some(icon_color) });
-    let mut btn = button(icon)
-        .padding(8)
-        .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(bg)),
-            border: Border { radius: 6.0.into(), ..Default::default() },
-            ..Default::default()
-        });
-    if enabled {
-        btn = btn.on_press(msg);
-    }
-    btn
-}
-
-enum PanelState {
-    /// No command run yet — show the list of available sub-commands.
-    Idle,
-    /// Last command produced a result (success or error).
-    Result {
-        prompt: String,
-        output: String,
-        /// Pre-built copy text (prompt + output joined).
-        copy_text: String,
-    },
-}
 
 pub struct Settings {
     query: String,
     panel: PanelState,
     copy_feedback: bool,
     shake: ShakeState,
+    /// Cached list of installed theme names, refreshed on reset().
+    themes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +73,7 @@ impl Settings {
             panel: PanelState::Idle,
             copy_feedback: false,
             shake: ShakeState::default(),
+            themes: list_themes(),
         }
     }
 
@@ -121,6 +82,7 @@ impl Settings {
         self.shake = ShakeState::default();
         self.copy_feedback = false;
         self.panel = PanelState::Idle;
+        self.themes = list_themes();
     }
 
     /// Parse the current query and execute the matching sub-command.
@@ -132,13 +94,7 @@ impl Settings {
         if q == "theme" || q.starts_with("theme ") {
             let name = q.strip_prefix("theme").unwrap_or("").trim();
             if name.is_empty() {
-                // Show theme usage + list
-                let themes = list_themes();
-                let list = if themes.is_empty() {
-                    "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                } else {
-                    themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
-                };
+                let list = self.format_theme_list();
                 let output = format!("Usage: theme <name>\n\nAvailable themes:\n{list}");
                 let copy_text = format!("$ {q}\n{output}");
                 self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
@@ -146,30 +102,19 @@ impl Settings {
                 return ComponentEvent::Handled;
             }
 
-            let path = themes_dir().map(|d| d.join(format!("{}.conf", name)));
+            let path = themes_dir().map(|d| d.join(format!("{name}.conf")));
             match path.and_then(|p| crate::theme::Theme::from_file(&p)) {
                 Some(theme) => {
                     let output = format!("Theme '{name}' applied.");
                     let copy_text = format!("$ {q}\n{output}");
-                    self.panel = PanelState::Result {
-                        prompt: q.to_string(),
-                        output,
-                        copy_text,
-                    };
+                    self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
                     self.query.clear();
                     self.copy_feedback = false;
-                    return ComponentEvent::ThemeChanged(name.to_string(), theme);
+                    return ComponentEvent::ThemeChanged(name.to_string(), Box::new(theme));
                 }
                 None => {
-                    let themes = list_themes();
-                    let list = if themes.is_empty() {
-                        "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                    } else {
-                        themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
-                    };
-                    let output = format!(
-                        "Theme '{name}' not found.\n\nAvailable themes:\n{list}"
-                    );
+                    let list = self.format_theme_list();
+                    let output = format!("Theme '{name}' not found.\n\nAvailable themes:\n{list}");
                     let copy_text = format!("$ {q}\n{output}");
                     self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
                     self.shake = ShakeState::trigger();
@@ -184,6 +129,14 @@ impl Settings {
         self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
         self.shake = ShakeState::trigger();
         ComponentEvent::Handled
+    }
+
+    fn format_theme_list(&self) -> String {
+        if self.themes.is_empty() {
+            "  (no themes found in ~/.config/trebuchet/themes/)".into()
+        } else {
+            self.themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
+        }
     }
 }
 
@@ -266,7 +219,7 @@ impl Component for Settings {
             Msg::Copy => {
                 let text_to_copy = match &self.panel {
                     PanelState::Result { copy_text, .. } => copy_text.clone(),
-                    PanelState::Idle => String::new(),
+                    _ => String::new(),
                 };
                 if !text_to_copy.is_empty() {
                     let _ = std::process::Command::new("wl-copy").arg(&text_to_copy).spawn();
@@ -291,18 +244,12 @@ impl Component for Settings {
     }
 
     fn view<'a>(&'a self, _apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
-        // ── Panel body ────────────────────────────────────────────────────────
         let (idle_color, text_color, prompt_color) =
             (config.theme.ai_idle, config.theme.terminal_output, config.theme.terminal_prompt);
 
         let body: Element<'a, Msg> = match &self.panel {
             PanelState::Idle => {
-                let themes = list_themes();
-                let theme_list: String = if themes.is_empty() {
-                    "  (no themes found in ~/.config/trebuchet/themes/)".into()
-                } else {
-                    themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
-                };
+                let theme_list = self.format_theme_list();
                 let mut items: Vec<Element<'a, Msg>> = vec![
                     text("Available commands:").size(13).color(prompt_color).into(),
                     text("  theme <name>    switch the colour theme")
@@ -324,6 +271,9 @@ impl Component for Settings {
                 }
                 column(items).spacing(6).into()
             }
+            // Settings never enters Running — this arm is here because PanelState
+            // is shared with Cmd which does have async commands.
+            PanelState::Running { .. } => column![].into(),
             PanelState::Result { prompt, output, .. } => {
                 let prompt_line = text(format!("$ {prompt}"))
                     .font(Font::MONOSPACE)
@@ -355,7 +305,6 @@ impl Component for Settings {
         )
         .on_press(Msg::PanelClick);
 
-        // ── Action bar (ai_agent style) ───────────────────────────────────────
         let has_result = matches!(self.panel, PanelState::Result { .. });
         let (btn_bg, feedback_color) =
             (config.theme.button_background, config.theme.copy_feedback);
