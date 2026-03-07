@@ -129,8 +129,8 @@ impl Settings {
         let q = query.trim();
 
         // ── theme <name> ───────────────────────────────────────────────────────
-        if let Some(raw_name) = q.strip_prefix("theme") {
-            let name = raw_name.trim();
+        if q == "theme" || q.starts_with("theme ") {
+            let name = q.strip_prefix("theme").unwrap_or("").trim();
             if name.is_empty() {
                 // Show theme usage + list
                 let themes = list_themes();

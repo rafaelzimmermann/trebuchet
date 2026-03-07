@@ -15,8 +15,6 @@ use crate::components::component::Component;
 use crate::components::settings::{self, Settings};
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
-use crate::ui::ShakeState;
-
 // ── Active component ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,14 +112,9 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             state.active = ActiveComponent::Cmd;
             state.cmd.reset();
         }
-        ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {
-            // Unknown slash commands from the launcher just shake — custom
-            // commands are accessed via /cmd, not directly from the launcher.
-            state.launcher.shake = ShakeState::trigger();
-            state.launcher.query.clear();
-            let apps = state.apps.clone();
-            state.launcher.apply_filter(&apps, "");
-        }
+        // No component currently produces CommandInvoked(Unknown) — unknown
+        // slash commands are handled locally (shake) in each component.
+        ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
     }
 }
 

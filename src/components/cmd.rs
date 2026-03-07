@@ -324,3 +324,125 @@ impl Component for Cmd {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, CustomCommand};
+
+    fn config_with(cmds: Vec<CustomCommand>) -> Config {
+        Config { commands: cmds, ..Config::default() }
+    }
+
+    fn silent_cmd(prefix: &str, command: &str) -> CustomCommand {
+        CustomCommand { prefix: prefix.to_string(), command: command.to_string(), display_result: false }
+    }
+
+    fn display_cmd(prefix: &str, command: &str) -> CustomCommand {
+        CustomCommand { prefix: prefix.to_string(), command: command.to_string(), display_result: true }
+    }
+
+    // ── Cmd::new / reset ──────────────────────────────────────────────────────
+
+    #[test]
+    fn new_starts_empty_and_idle() {
+        let c = Cmd::new();
+        assert!(c.query.is_empty());
+        assert!(matches!(c.panel, PanelState::Idle));
+        assert!(!c.copy_feedback);
+    }
+
+    #[test]
+    fn reset_clears_query_and_panel() {
+        let mut c = Cmd::new();
+        c.query = "uptime".to_string();
+        c.panel = PanelState::Result {
+            prompt: "uptime".to_string(),
+            output: "up 3 hours".to_string(),
+            copy_text: "$ uptime\nup 3 hours".to_string(),
+        };
+        c.copy_feedback = true;
+        c.reset();
+        assert!(c.query.is_empty());
+        assert!(matches!(c.panel, PanelState::Idle));
+        assert!(!c.copy_feedback);
+    }
+
+    // ── Cmd::execute ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn execute_no_match_returns_handled() {
+        let mut c = Cmd::new();
+        let evt = c.execute("unknown", &config_with(vec![]));
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    #[test]
+    fn execute_display_result_shows_output() {
+        let mut c = Cmd::new();
+        let cfg = config_with(vec![display_cmd("hi", "echo hello")]);
+        let evt = c.execute("hi", &cfg);
+        assert_eq!(evt, ComponentEvent::Handled);
+        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output.contains("hello")));
+        assert!(c.query.is_empty(), "query should be cleared after execute");
+    }
+
+    #[test]
+    fn execute_display_result_empty_stdout_shows_placeholder() {
+        let mut c = Cmd::new();
+        // `true` exits 0 but produces no stdout.
+        let cfg = config_with(vec![display_cmd("noop", "true")]);
+        let evt = c.execute("noop", &cfg);
+        assert_eq!(evt, ComponentEvent::Handled);
+        assert!(matches!(&c.panel, PanelState::Result { output, .. } if output == "(no output)"));
+    }
+
+    #[test]
+    fn execute_silent_returns_exit() {
+        let mut c = Cmd::new();
+        // Use `true` — exits 0, no output; spawn() won't block.
+        let cfg = config_with(vec![silent_cmd("noop", "true")]);
+        let evt = c.execute("noop", &cfg);
+        assert_eq!(evt, ComponentEvent::Exit);
+    }
+
+    #[test]
+    fn execute_trims_query_whitespace() {
+        let mut c = Cmd::new();
+        let cfg = config_with(vec![display_cmd("ip", "echo 1.2.3.4")]);
+        let evt = c.execute("  ip  ", &cfg);
+        assert_eq!(evt, ComponentEvent::Handled);
+        assert!(matches!(c.panel, PanelState::Result { .. }));
+    }
+
+    #[test]
+    fn execute_failed_command_shows_error() {
+        let mut c = Cmd::new();
+        // Command that does not exist.
+        let cfg = config_with(vec![display_cmd("oops", "this_binary_does_not_exist_xyz")]);
+        let evt = c.execute("oops", &cfg);
+        // Either shows output (exit-code error message) or handles gracefully.
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    // ── Cmd::update ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn update_copied_clears_feedback() {
+        let mut c = Cmd::new();
+        c.copy_feedback = true;
+        let apps: Vec<crate::launcher::AppEntry> = vec![];
+        let cfg = Config::default();
+        let _ = c.update(Msg::Copied, &apps, &cfg);
+        assert!(!c.copy_feedback);
+    }
+
+    #[test]
+    fn update_panel_click_is_noop() {
+        let mut c = Cmd::new();
+        let apps: Vec<crate::launcher::AppEntry> = vec![];
+        let (task, evt) = c.update(Msg::PanelClick, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+        let _ = task;
+    }
+}
