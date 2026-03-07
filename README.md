@@ -97,9 +97,10 @@ cargo run --release
 | Enter | Launch selected application |
 | Click | Launch application |
 | `/ai <question>` + Enter | Switch to AI assistant |
-| `/app` + Enter | Return to app grid from AI mode |
-| `/<prefix>` + Enter | Run a custom command |
-| Escape | Close launcher (or return to app grid from AI mode) |
+| `/cmd` + Space or Enter | Open custom command runner |
+| `/config` + Space or Enter | Open settings panel |
+| `/app` + Space or Enter | Return to app grid from any panel |
+| Escape | Return to app grid (from any panel) |
 
 ## AI assistant
 
@@ -166,6 +167,25 @@ ai_api_key  = sk-ant-...
 ai_model    = claude-sonnet-4-6
 ```
 
+## Settings panel
+
+Type `/config` (then Space or Enter) to open the settings panel. From there you can switch the colour theme:
+
+```
+theme <name>
+```
+
+Trebuchet looks for `.conf` files in `~/.config/trebuchet/themes/`. The panel lists all available themes at idle so you can see your options at a glance.
+
+```sh
+# Example: drop a theme file into place
+cp my-theme.conf ~/.config/trebuchet/themes/my-theme.conf
+# Then inside trebuchet:
+# /config → theme my-theme
+```
+
+The Copy button copies the last command output (prompt + result) to the clipboard.
+
 ## Custom commands
 
 Define shell shortcuts that trigger by typing a prefix and pressing Enter.
@@ -197,6 +217,13 @@ display_result = true
 ```
 
 The `command` is executed with `sh -c`, so pipes, substitutions, and any shell built-in work. Multiple `[[command]]` blocks can be defined; they accumulate across config layers.
+
+### Using the command runner
+
+Type `/cmd` (then Space or Enter) to open the command runner panel. The idle view lists all configured prefixes. Type a prefix and press Enter to run it:
+
+- Commands with `display_result = false` (default) run silently and close the launcher.
+- Commands with `display_result = true` run asynchronously — a "Running…" indicator appears immediately; the output is shown in the panel when the command completes. The Copy button copies the prompt + output to the clipboard.
 
 ## Configuration
 

@@ -2,7 +2,7 @@ use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
     time,
-    widget::{column, container, mouse_area, row, scrollable, text, Space},
+    widget::{column, container, row, scrollable, text, Space},
     Alignment, Background, Border, Element, Event, Font, Length, Subscription, Task,
 };
 use std::path::PathBuf;
@@ -27,9 +27,6 @@ pub struct Settings {
 #[derive(Debug, Clone)]
 pub enum Msg {
     QueryChanged(String),
-    /// Absorbs mouse clicks on the panel so they don't propagate as Ignored
-    /// (which would close the window).
-    PanelClick,
     Copy,
     Copied,
     ShakeTick,
@@ -215,7 +212,6 @@ impl Component for Settings {
             Msg::QueryChanged(s) => {
                 self.query = s;
             }
-            Msg::PanelClick => {}
             Msg::Copy => {
                 let text_to_copy = match &self.panel {
                     PanelState::Result { copy_text, .. } => copy_text.clone(),
@@ -288,22 +284,19 @@ impl Component for Settings {
         };
 
         let panel_bg = config.theme.terminal_background;
-        let panel = mouse_area(
-            container(
-                scrollable(container(body).width(Length::Fill).padding([0, 4]))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .style(move |_theme| container::Style {
-                background: Some(Background::Color(panel_bg)),
-                border: Border { radius: 10.0.into(), ..Default::default() },
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding([16, 20]),
+        let panel = container(
+            scrollable(container(body).width(Length::Fill).padding([0, 4]))
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
-        .on_press(Msg::PanelClick);
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(panel_bg)),
+            border: Border { radius: 10.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding([16, 20]);
 
         let has_result = matches!(self.panel, PanelState::Result { .. });
         let (btn_bg, feedback_color) =
@@ -323,12 +316,16 @@ impl Component for Settings {
         .spacing(6)
         .align_y(Alignment::Center);
 
-        column![
-            search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
-            panel,
-            action_bar,
-        ]
-        .spacing(8)
+        container(
+            column![
+                search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
+                panel,
+                action_bar,
+            ]
+            .spacing(8)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
         .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -341,5 +338,37 @@ impl Component for Settings {
         } else {
             Subscription::none()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::command::ComponentEvent;
+    use crate::ui::panel::PanelState;
+
+    // Regression: Copy when idle must not exit the launcher.
+    // A button rendered without on_press leaks Status::Ignored which app.rs
+    // maps to Message::Close. The handler must return Handled in all non-Result states.
+
+    #[test]
+    fn copy_when_idle_returns_handled() {
+        let mut s = Settings::new(); // panel starts Idle
+        let apps: Vec<crate::launcher::AppEntry> = vec![];
+        let (_, evt) = s.update(Msg::Copy, &apps, &crate::config::Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    #[test]
+    fn reset_leaves_panel_idle() {
+        let mut s = Settings::new();
+        s.panel = PanelState::Result {
+            prompt: "theme dark".to_string(),
+            output: "Theme 'dark' applied.".to_string(),
+            copy_text: "$ theme dark\nTheme 'dark' applied.".to_string(),
+        };
+        s.reset();
+        assert!(matches!(s.panel, PanelState::Idle));
+        assert!(s.query.is_empty());
     }
 }

@@ -2,7 +2,7 @@ use iced::{
     event,
     event::Status,
     mouse,
-    widget::container,
+    widget::{container, mouse_area},
     Background, Border, Element, Event, Length, Subscription, Task,
 };
 use iced_layershell::to_layer_message;
@@ -43,6 +43,8 @@ pub struct Trebuchet {
 #[derive(Debug, Clone)]
 pub enum Message {
     Close,
+    /// Absorbs clicks anywhere inside the window so they don't propagate as Ignored.
+    Absorb,
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
@@ -123,6 +125,7 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     match msg {
         Message::Close => std::process::exit(0),
+        Message::Absorb => {}
 
         Message::Launcher(m) => {
             let (task, evt) = state.launcher.update(m, &state.apps, &state.config);
@@ -193,27 +196,57 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     };
 
     let bg = state.config.theme.background;
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_theme| container::Style {
-            background: Some(Background::Color(bg)),
-            border: Border { radius: 16.0.into(), ..Default::default() },
-            ..Default::default()
-        })
-        .into()
+    mouse_area(
+        container(content)
+            .padding([0, 0])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(Background::Color(bg)),
+                border: Border { radius: 16.0.into(), ..Default::default() },
+                ..Default::default()
+            }),
+    )
+    .on_press(Message::Absorb)
+    .into()
 }
 
 // ── Event handler ─────────────────────────────────────────────────────────────
 
 fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Message> {
     match &event {
+        // Close when the cursor leaves the window (click outside on Wayland).
         Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Close),
-        Event::Mouse(mouse::Event::ButtonPressed(_)) if status == Status::Ignored => {
-            Some(Message::Close)
-        }
         Event::Keyboard(_) => Some(Message::IcedEvent(event, status)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::mouse;
+
+    #[test]
+    fn cursor_left_closes_launcher() {
+        let result = on_event(
+            Event::Mouse(mouse::Event::CursorLeft),
+            Status::Ignored,
+            iced::window::Id::unique(),
+        );
+        assert!(matches!(result, Some(Message::Close)));
+    }
+
+    #[test]
+    fn click_inside_does_not_close() {
+        // All clicks inside the window are absorbed by the top-level mouse_area
+        // in view(); on_event no longer maps ButtonPressed to Close.
+        let result = on_event(
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Status::Ignored,
+            iced::window::Id::unique(),
+        );
+        assert!(result.is_none());
     }
 }
 

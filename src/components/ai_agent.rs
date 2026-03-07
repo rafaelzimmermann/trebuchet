@@ -1,9 +1,9 @@
 use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
-    widget::markdown,
+    widget::{container, markdown},
     time,
-    Element, Event, Subscription, Task,
+    Element, Event, Length, Subscription, Task,
 };
 use std::time::Duration;
 
@@ -223,28 +223,31 @@ impl Component for AIAgent {
         let model_labels: Vec<String> = config.ai_models.iter().map(|m| m.label.clone()).collect();
         let selected_label = model_labels.get(self.selected_model).cloned();
 
-        let content = iced::widget::column![
-            search_bar(&self.query, &self.shake, SearchIcon::Robot, &config.theme, Msg::QueryChanged),
-            ai_panel(
-                &self.status,
-                &self.prompt,
-                self.copy_feedback,
-                &self.response_items,
-                model_labels,
-                selected_label,
-                &config.theme,
-                Msg::CopyResponse,
-                Msg::Retry,
-                Msg::LinkClicked,
-                Msg::ModelSelected,
-            ),
-        ]
-        .spacing(16)
+        container(
+            iced::widget::column![
+                search_bar(&self.query, &self.shake, SearchIcon::Robot, &config.theme, Msg::QueryChanged),
+                ai_panel(
+                    &self.status,
+                    &self.prompt,
+                    self.copy_feedback,
+                    &self.response_items,
+                    model_labels,
+                    selected_label,
+                    &config.theme,
+                    Msg::CopyResponse,
+                    Msg::Retry,
+                    Msg::LinkClicked,
+                    Msg::ModelSelected,
+                ),
+            ]
+            .spacing(16)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
         .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
-        .width(iced::Length::Fill)
-        .height(iced::Length::Fill);
-
-        content.into()
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Msg> {
@@ -259,5 +262,42 @@ impl Component for AIAgent {
             Subscription::none()
         };
         Subscription::batch([loading, shake])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::command::ComponentEvent;
+    use crate::config::Config;
+    use crate::launcher::AppEntry;
+
+    // Regression: Copy/Retry when there is no response must not exit the launcher.
+    // Buttons rendered without on_press leak Status::Ignored which app.rs maps to
+    // Message::Close. These handlers must return Handled in all non-Done states.
+
+    #[test]
+    fn copy_when_idle_returns_handled() {
+        let mut a = AIAgent::new(); // status starts Idle
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = a.update(Msg::CopyResponse, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    #[test]
+    fn copy_when_loading_returns_handled() {
+        let mut a = AIAgent::new();
+        a.status = AiStatus::Loading { tick: 0 };
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = a.update(Msg::CopyResponse, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    #[test]
+    fn retry_when_idle_returns_handled() {
+        let mut a = AIAgent::new(); // prompt is empty
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = a.update(Msg::Retry, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
     }
 }

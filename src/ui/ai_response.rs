@@ -33,17 +33,17 @@ fn icon_btn<'a, Msg: Clone + 'a>(
         .width(16)
         .height(16)
         .style(move |_theme, _status| svg::Style { color: Some(icon_color) });
-    let mut btn = button(icon)
+    // Always register on_press so the button consumes the click even when
+    // visually disabled. Without it, the click leaks as Status::Ignored and
+    // app.rs interprets that as a background click, closing the launcher.
+    button(icon)
         .padding(8)
         .style(move |_theme, _status| button::Style {
             background: Some(Background::Color(bg)),
             border: Border { radius: 6.0.into(), ..Default::default() },
             ..Default::default()
-        });
-    if enabled {
-        btn = btn.on_press(msg);
-    }
-    btn
+        })
+        .on_press(msg)
 }
 
 fn md_settings(theme: &Theme) -> markdown::Settings {

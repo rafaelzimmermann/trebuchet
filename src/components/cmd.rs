@@ -2,7 +2,7 @@ use iced::{
     event::Status,
     keyboard::{self, key::Named, Key},
     time,
-    widget::{column, container, mouse_area, row, scrollable, text, Space},
+    widget::{column, container, row, scrollable, text, Space},
     Alignment, Background, Border, Element, Event, Font, Length, Subscription, Task,
 };
 use std::time::Duration;
@@ -256,22 +256,19 @@ impl Component for Cmd {
         };
 
         let panel_bg = config.theme.terminal_background;
-        let panel = mouse_area(
-            container(
-                scrollable(container(body).width(Length::Fill).padding([0, 4]))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .style(move |_theme| container::Style {
-                background: Some(Background::Color(panel_bg)),
-                border: Border { radius: 10.0.into(), ..Default::default() },
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding([16, 20]),
+        let panel = container(
+            scrollable(container(body).width(Length::Fill).padding([0, 4]))
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
-        .on_press(Msg::PanelClick);
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(panel_bg)),
+            border: Border { radius: 10.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding([0, 0]);
 
         let has_result = matches!(self.panel, PanelState::Result { .. });
         let (btn_bg, feedback_color) =
@@ -291,12 +288,16 @@ impl Component for Cmd {
         .spacing(6)
         .align_y(Alignment::Center);
 
-        column![
-            search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
-            panel,
-            action_bar,
-        ]
-        .spacing(8)
+        container(
+            column![
+                search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
+                panel,
+                action_bar,
+            ]
+            .spacing(8)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
         .padding(iced::Padding { top: 24.0, bottom: 24.0, left: 80.0, right: 80.0 })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -431,6 +432,28 @@ mod tests {
         let apps: Vec<AppEntry> = vec![];
         let _ = c.update(Msg::CommandOutput(Ok("done".to_string())), &apps, &Config::default());
         assert!(matches!(&c.panel, PanelState::Result { prompt, .. } if prompt == "mycommand"));
+    }
+
+    // ── Copy button: must not exit when there is no output ────────────────────
+    // Regression for: clicking Copy while idle/running caused launcher exit
+    // because a button without on_press leaks Status::Ignored, which app.rs
+    // maps to Message::Close / process::exit(0).
+
+    #[test]
+    fn copy_when_idle_returns_handled() {
+        let mut c = Cmd::new(); // panel starts Idle
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = c.update(Msg::Copy, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
+    }
+
+    #[test]
+    fn copy_when_running_returns_handled() {
+        let mut c = Cmd::new();
+        c.panel = PanelState::Running { prompt: "uptime".to_string() };
+        let apps: Vec<AppEntry> = vec![];
+        let (_, evt) = c.update(Msg::Copy, &apps, &Config::default());
+        assert_eq!(evt, ComponentEvent::Handled);
     }
 
     // ── Cmd::update misc ──────────────────────────────────────────────────────

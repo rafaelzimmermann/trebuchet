@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-07
+
 ### Added
 - `/cmd` command runner: type `/cmd` (+ space or Enter) to open a dedicated terminal-style panel for running configured shell commands; type a prefix and press Enter to trigger it; ESC returns to the launcher
 - `/config` panel now lists available themes at idle — no sub-command needed to see them
