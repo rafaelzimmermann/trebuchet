@@ -1,6 +1,6 @@
 use iced::{
     widget::{button, column, image, row, svg, text, Space},
-    Alignment, Background, Border, Color, Element, Length,
+    Alignment, Background, Border, Element, Length,
 };
 
 /// Fallback icon shown when no icon can be resolved for an app.
@@ -58,21 +58,23 @@ pub fn app_grid<'a, Msg: Clone + 'a>(
 
                     let label = text(app.name.as_str())
                         .size(13)
-                        .color(Color::WHITE);
+                        .color(config.theme.app_label);
 
                     let cell = column![icon, label]
                         .align_x(Alignment::Center)
                         .spacing(6);
 
+                    let (label_color, selected_bg) =
+                        (config.theme.app_label, config.theme.app_selected);
                     button(cell)
                         .on_press(on_activate(idx))
                         .padding(12)
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .style(move |_theme, _status| button::Style {
-                            text_color: Color::WHITE,
+                            text_color: label_color,
                             background: if is_selected {
-                                Some(Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.15 }))
+                                Some(Background::Color(selected_bg))
                             } else {
                                 None
                             },

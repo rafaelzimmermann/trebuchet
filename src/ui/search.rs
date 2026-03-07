@@ -3,6 +3,8 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length,
 };
 
+use crate::theme::Theme;
+
 const SEARCH_ID_LAUNCHER:  &str = "trebuchet_search_launcher";
 const SEARCH_ID_AI:        &str = "trebuchet_search_ai";
 const SEARCH_ID_TERMINAL:  &str = "trebuchet_search_terminal";
@@ -62,6 +64,7 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
     query: &str,
     shake: &ShakeState,
     icon: SearchIcon,
+    theme: &Theme,
     on_input: impl Fn(String) -> Msg + 'a,
 ) -> Element<'a, Msg> {
     let (icon_bytes, search_id) = match icon {
@@ -79,38 +82,32 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         SearchIcon::Robot    => "Ask anything...",
         SearchIcon::Terminal => "",
     };
+    let (text_color, placeholder_color, selection_color) =
+        (theme.search_text, theme.search_placeholder, theme.search_selection);
     let input = text_input(placeholder, query)
         .id(Id::new(search_id))
         .on_input(on_input)
         .padding(0)
         .size(20)
         .width(Length::Fill)
-        .style(|_theme, _status| text_input::Style {
+        .style(move |_theme, _status| text_input::Style {
             background: Background::Color(Color::TRANSPARENT),
             border: Border::default(),
-            icon: Color::WHITE,
-            placeholder: Color { r: 0.6, g: 0.6, b: 0.7, a: 1.0 },
-            value: Color::WHITE,
-            selection: Color { r: 0.4, g: 0.5, b: 0.9, a: 0.45 },
+            icon: text_color,
+            placeholder: placeholder_color,
+            value: text_color,
+            selection: selection_color,
         });
 
     let inner = row![icon_widget, input]
         .spacing(12)
         .align_y(Alignment::Center);
 
+    let (bg, border_color) = (theme.search_background, theme.search_border);
     let pill = container(inner)
-        .style(|_theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 0.12,
-            })),
-            border: Border {
-                radius: 12.0.into(),
-                width: 1.0,
-                color: Color { r: 1.0, g: 1.0, b: 1.0, a: 0.22 },
-            },
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border { radius: 12.0.into(), width: 1.0, color: border_color },
             ..Default::default()
         })
         .padding([12, 20])

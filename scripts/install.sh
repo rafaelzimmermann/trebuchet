@@ -65,6 +65,7 @@ ICON_DEST="$DATA_DIR/icons"
 DESKTOP_FILE="$DESKTOP_DIR/trebuchet.desktop"
 CONFIG_DIR="${HOME}/.config/trebuchet"
 CONFIG_FILE="$CONFIG_DIR/trebuchet.conf"
+THEMES_DIR="$CONFIG_DIR/themes"
 
 # ── Privilege helpers ─────────────────────────────────────────────────────────
 # Use sudo only when --system and we're not already root.
@@ -150,6 +151,17 @@ else
     if confirm "Config already exists at $CONFIG_FILE. Overwrite?"; then
         OVERWRITE_CONFIG=true
         CONFIG_FRESH=true
+    fi
+fi
+
+UPDATE_THEMES=false
+if [[ ! -d "$THEMES_DIR" || -z "$(ls -A "$THEMES_DIR" 2>/dev/null)" ]]; then
+    UPDATE_THEMES=true
+elif $OVERWRITE_CONFIG; then
+    UPDATE_THEMES=true
+else
+    if confirm "Themes already exist at $THEMES_DIR. Update them?"; then
+        UPDATE_THEMES=true
     fi
 fi
 
@@ -257,6 +269,14 @@ else
     echo "Keeping existing config."
 fi
 
+if $UPDATE_THEMES && [[ -d assets/themes ]]; then
+    echo "Installing themes to $THEMES_DIR…"
+    mkdir -p "$THEMES_DIR"
+    cp assets/themes/*.conf "$THEMES_DIR/"
+else
+    echo "Keeping existing themes."
+fi
+
 if $DO_AI_SETUP; then
     {
         printf "\n# AI assistant\n"
@@ -285,6 +305,7 @@ echo "Installed:  $BINARY"
 [[ -d "$ICON_DEST" ]] && echo "Icons:      $ICON_DEST"
 echo "Desktop:    $DESKTOP_FILE"
 echo "Config:     $CONFIG_FILE"
+[[ -d "$THEMES_DIR" ]] && echo "Themes:     $THEMES_DIR"
 echo ""
 
 # Warn if the bin dir isn't on PATH.

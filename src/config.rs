@@ -1,3 +1,5 @@
+use crate::theme::Theme;
+
 const DEFAULT_CONF: &str = include_str!("../assets/trebuchet.conf");
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -54,17 +56,27 @@ pub struct Config {
     /// Ordered list of AI model configs. First entry is the default.
     pub ai_models: Vec<AiModelConfig>,
     pub commands: Vec<CustomCommand>,
+    pub theme: Theme,
 }
 
 impl Config {
     pub fn load() -> Self {
         let mut cfg = Self::parse(Self::default(), DEFAULT_CONF);
-        if let Some(content) = std::env::var("HOME")
-            .ok()
-            .map(|h| std::path::PathBuf::from(h).join(".config/trebuchet/trebuchet.conf"))
+        if let Some(content) = config_path("trebuchet.conf")
             .and_then(|p| std::fs::read_to_string(p).ok())
         {
             cfg = Self::parse(cfg, &content);
+        }
+        // Apply the last-selected theme (written by /theme <name>).
+        if let Some(name) = config_path("current-theme")
+            .and_then(|p| std::fs::read_to_string(p).ok())
+        {
+            let name = name.trim().to_string();
+            if let Some(theme) = config_path(&format!("themes/{}.conf", name))
+                .and_then(|p| Theme::from_file(&p))
+            {
+                cfg.theme = theme;
+            }
         }
         cfg
     }
@@ -82,6 +94,7 @@ impl Config {
         let mut cur_ai_model: Option<String> = None;
         let mut cur_ai_base_url: Option<String> = None;
         let mut in_ai_block = false;
+
 
         // ── Legacy flat AI keys (backward compat) ─────────────────────────────
         let mut legacy_provider: Option<AiProvider> = None;
@@ -131,7 +144,7 @@ impl Config {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if line == "[[command]]" {
+            if line.starts_with('[') {
                 if in_ai_block {
                     finalize_ai(&mut base, &mut cur_ai_provider, &mut cur_ai_api_key,
                                 &mut cur_ai_model, &mut cur_ai_base_url);
@@ -139,20 +152,13 @@ impl Config {
                 }
                 if in_cmd_block {
                     finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
-                }
-                in_cmd_block = true;
-                continue;
-            }
-            if line == "[[ai_model]]" {
-                if in_cmd_block {
-                    finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
                     in_cmd_block = false;
                 }
-                if in_ai_block {
-                    finalize_ai(&mut base, &mut cur_ai_provider, &mut cur_ai_api_key,
-                                &mut cur_ai_model, &mut cur_ai_base_url);
+                match line {
+                    "[[command]]"  => in_cmd_block = true,
+                    "[[ai_model]]" => in_ai_block  = true,
+                    _              => {}
                 }
-                in_ai_block = true;
                 continue;
             }
 
@@ -241,6 +247,12 @@ impl Config {
     }
 }
 
+fn config_path(rel: &str) -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join(".config/trebuchet").join(rel))
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -249,6 +261,7 @@ impl Default for Config {
             icon_size: 96,
             ai_models: Vec::new(),
             commands: Vec::new(),
+            theme: Theme::default(),
         }
     }
 }

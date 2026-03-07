@@ -5,6 +5,7 @@ use iced::{
 };
 
 use crate::components::ai_agent::AiStatus;
+use crate::theme::Theme;
 
 const VERBS: [&str; 4] = ["Catapulting", "Launching", "Hurling", "Slinging"];
 
@@ -24,23 +25,18 @@ fn icon_btn<'a, Msg: Clone + 'a>(
     icon_bytes: &'static [u8],
     msg: Msg,
     enabled: bool,
+    btn_bg: Color,
 ) -> iced::widget::Button<'a, Msg> {
-    let alpha = if enabled { 1.0 } else { 0.35 };
+    let icon_color = Color { a: if enabled { 1.0 } else { 0.35 }, ..Color::WHITE };
+    let bg = Color { a: if enabled { btn_bg.a } else { btn_bg.a * 0.4 }, ..btn_bg };
     let icon = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(16)
         .height(16)
-        .style(move |_theme, _status| svg::Style {
-            color: Some(Color { r: 1.0, g: 1.0, b: 1.0, a: alpha }),
-        });
+        .style(move |_theme, _status| svg::Style { color: Some(icon_color) });
     let mut btn = button(icon)
         .padding(8)
         .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: if enabled { 0.10 } else { 0.04 },
-            })),
+            background: Some(Background::Color(bg)),
             border: Border { radius: 6.0.into(), ..Default::default() },
             ..Default::default()
         });
@@ -50,18 +46,20 @@ fn icon_btn<'a, Msg: Clone + 'a>(
     btn
 }
 
-fn md_settings() -> markdown::Settings {
+fn md_settings(theme: &Theme) -> markdown::Settings {
+    let (code_bg, code_text, link) =
+        (theme.ai_code_background, theme.ai_code_text, theme.ai_link);
     markdown::Settings::with_text_size(15, markdown::Style {
         font: Font::default(),
         inline_code_highlight: markdown::Highlight {
-            background: Background::Color(Color { r: 0.18, g: 0.18, b: 0.26, a: 1.0 }),
+            background: Background::Color(code_bg),
             border: Border { radius: 3.0.into(), ..Default::default() },
         },
         inline_code_padding: Padding { top: 1.0, right: 4.0, bottom: 1.0, left: 4.0 },
-        inline_code_color: Color { r: 0.95, g: 0.78, b: 0.50, a: 1.0 },
+        inline_code_color: code_text,
         inline_code_font: Font::MONOSPACE,
         code_block_font: Font::MONOSPACE,
-        link_color: Color { r: 0.45, g: 0.75, b: 1.0, a: 1.0 },
+        link_color: link,
     })
 }
 
@@ -72,6 +70,7 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
     items: &'a [markdown::Item],
     models: Vec<String>,
     selected_model: Option<String>,
+    theme: &Theme,
     on_copy: Msg,
     on_retry: Msg,
     on_link: impl Fn(String) -> Msg + 'a,
@@ -82,11 +81,13 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
 
     // ── Body — lives inside the dark rounded box ──────────────────────────────
 
+    let (idle_color, error_color, text_color) =
+        (theme.ai_idle, theme.ai_error, theme.search_text);
     let body: Element<'a, Msg> = match status {
         AiStatus::Idle => container(
             text("Type /ai followed by your question")
                 .size(15)
-                .color(Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 }),
+                .color(idle_color),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -96,12 +97,8 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
 
         AiStatus::Loading { tick } => {
             let verb = VERBS[prompt.len() % 4];
-            let dots = match tick {
-                0 => ".  ",
-                1 => ".. ",
-                _ => "...",
-            };
-            container(text(format!("{verb}{dots}")).size(18).color(Color::WHITE))
+            let dots = match tick { 0 => ".  ", 1 => ".. ", _ => "..." };
+            container(text(format!("{verb}{dots}")).size(18).color(text_color))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_x(alignment::Horizontal::Center)
@@ -110,29 +107,26 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
         }
 
         AiStatus::Done(_) => scrollable(
-            container(
-                markdown::view(items, md_settings()).map(on_link),
-            )
-            .width(Length::Fill)
-            .padding(4),
+            container(markdown::view(items, md_settings(theme)).map(on_link))
+                .width(Length::Fill)
+                .padding(4),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .into(),
 
         AiStatus::Error(err) => container(
-            text(format!("Error: {err}"))
-                .size(15)
-                .color(Color { r: 1.0, g: 0.4, b: 0.4, a: 1.0 }),
+            text(format!("Error: {err}")).size(15).color(error_color),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .into(),
     };
 
+    let panel_bg = theme.ai_panel;
     let text_area = container(body)
-        .style(|_theme| container::Style {
-            background: Some(Background::Color(Color { r: 0.05, g: 0.05, b: 0.09, a: 1.0 })),
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(panel_bg)),
             border: Border { radius: 10.0.into(), ..Default::default() },
             ..Default::default()
         })
@@ -142,27 +136,26 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
 
     // ── Action bar — outside the dark box ─────────────────────────────────────
 
+    let (btn_bg, idle_color2, feedback_color) =
+        (theme.button_background, theme.ai_idle, theme.copy_feedback);
     let model_picker: Element<'a, Msg> = if models.is_empty() {
         Space::new().width(0).height(0).into()
     } else {
         pick_list(models, selected_model, on_model_select)
             .text_size(13)
             .padding([4, 8])
-            .style(|_theme, _status| pick_list::Style {
+            .style(move |_theme, _status| pick_list::Style {
                 text_color: Color::WHITE,
-                placeholder_color: Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 },
-                handle_color: Color { r: 0.7, g: 0.7, b: 0.7, a: 1.0 },
-                background: Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.08 }),
+                placeholder_color: idle_color2,
+                handle_color: idle_color2,
+                background: Background::Color(btn_bg),
                 border: Border { radius: 6.0.into(), ..Default::default() },
             })
             .into()
     };
 
     let feedback: Element<'a, Msg> = if copy_feedback {
-        text("Copied to clipboard")
-            .size(13)
-            .color(Color { r: 0.5, g: 0.9, b: 0.6, a: 1.0 })
-            .into()
+        text("Copied to clipboard").size(13).color(feedback_color).into()
     } else {
         text("").size(13).into()
     };
@@ -171,8 +164,8 @@ pub fn ai_panel<'a, Msg: Clone + 'a>(
         model_picker,
         feedback,
         Space::new().width(Length::Fill),
-        icon_btn(COPY_ICON, on_copy, can_copy),
-        icon_btn(RETRY_ICON, on_retry, can_retry),
+        icon_btn(COPY_ICON, on_copy, can_copy, btn_bg),
+        icon_btn(RETRY_ICON, on_retry, can_retry, btn_bg),
     ]
     .spacing(6)
     .align_y(Alignment::Center);

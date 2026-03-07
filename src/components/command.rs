@@ -2,6 +2,7 @@
 pub enum SlashCommand {
     Ai,
     App,
+    Config,
     Unknown(String),
 }
 
@@ -16,9 +17,10 @@ impl SlashCommand {
         let args = rest[end + 1..].to_string();
         Some((
             match &rest[..end] {
-                "ai" => SlashCommand::Ai,
-                "app" => SlashCommand::App,
-                s => SlashCommand::Unknown(s.to_string()),
+                "ai"     => SlashCommand::Ai,
+                "app"    => SlashCommand::App,
+                "config" => SlashCommand::Config,
+                s        => SlashCommand::Unknown(s.to_string()),
             },
             args,
         ))
@@ -30,4 +32,5 @@ pub enum ComponentEvent {
     Handled,
     Exit,
     CommandInvoked(SlashCommand, String), // command + remaining args
+    ThemeChanged(String, crate::theme::Theme), // (name, theme) — settings emits this
 }

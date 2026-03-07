@@ -3,7 +3,7 @@ use iced::{
     event::Status,
     mouse,
     widget::container,
-    Background, Border, Color, Element, Event, Length, Subscription, Task,
+    Background, Border, Element, Event, Length, Subscription, Task,
 };
 use iced_layershell::to_layer_message;
 
@@ -12,6 +12,7 @@ use crate::components::app_launcher::{self, AppLauncher};
 use crate::components::command::{ComponentEvent, SlashCommand};
 use crate::components::command_result::{self, CommandResult};
 use crate::components::component::Component;
+use crate::components::settings::{self, Settings};
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
 use crate::ui::ShakeState;
@@ -23,6 +24,7 @@ pub enum ActiveComponent {
     Launcher,
     Ai,
     CommandResult,
+    Settings,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ pub struct Trebuchet {
     pub launcher: AppLauncher,
     pub ai_agent: AIAgent,
     pub command_result: CommandResult,
+    pub settings: Settings,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -46,6 +49,7 @@ pub enum Message {
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
     CommandResult(command_result::Msg),
+    Settings(settings::Msg),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -53,15 +57,14 @@ pub enum Message {
 pub fn boot() -> (Trebuchet, Task<Message>) {
     let apps = scan_applications();
     let launcher = AppLauncher::new(&apps);
-    let ai_agent = AIAgent::new();
-    let command_result = CommandResult::new();
     let state = Trebuchet {
         apps,
         config: Config::load(),
         active: ActiveComponent::Launcher,
         launcher,
-        ai_agent,
-        command_result,
+        ai_agent: AIAgent::new(),
+        command_result: CommandResult::new(),
+        settings: Settings::new(),
     };
     (state, Task::none())
 }
@@ -70,12 +73,30 @@ pub fn namespace() -> String {
     "trebuchet".into()
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn persist_theme(name: &str) {
+    let Some(dir) = std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::PathBuf::from(h).join(".config/trebuchet"))
+    else {
+        return;
+    };
+    let _ = std::fs::write(dir.join("current-theme"), name);
+}
+
 // ── Event application ─────────────────────────────────────────────────────────
 
 fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
     match event {
         ComponentEvent::Handled => {}
         ComponentEvent::Exit => std::process::exit(0),
+
+        ComponentEvent::ThemeChanged(name, theme) => {
+            state.config.theme = theme;
+            persist_theme(&name);
+        }
+
         ComponentEvent::CommandInvoked(SlashCommand::Ai, args) => {
             state.active = ActiveComponent::Ai;
             state.ai_agent.reset(args);
@@ -84,6 +105,10 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             state.active = ActiveComponent::Launcher;
             let apps = state.apps.clone();
             state.launcher.reset(&apps);
+        }
+        ComponentEvent::CommandInvoked(SlashCommand::Config, _) => {
+            state.active = ActiveComponent::Settings;
+            state.settings.reset();
         }
         ComponentEvent::CommandInvoked(SlashCommand::Unknown(name), _) => {
             let prefix = format!("/{}", name);
@@ -139,6 +164,11 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             apply_event(state, evt);
             return task.map(Message::CommandResult);
         }
+        Message::Settings(m) => {
+            let (task, evt) = state.settings.update(m, &state.apps, &state.config);
+            apply_event(state, evt);
+            return task.map(Message::Settings);
+        }
 
         Message::IcedEvent(event, status) => {
             let (task, evt) = match state.active {
@@ -153,6 +183,10 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 ActiveComponent::CommandResult => {
                     let (t, e) = state.command_result.handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::CommandResult), e)
+                }
+                ActiveComponent::Settings => {
+                    let (t, e) = state.settings.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::Settings), e)
                 }
             };
             apply_event(state, evt);
@@ -178,22 +212,18 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         ActiveComponent::CommandResult => {
             state.command_result.view(&state.apps, &state.config).map(Message::CommandResult)
         }
+        ActiveComponent::Settings => {
+            state.settings.view(&state.apps, &state.config).map(Message::Settings)
+        }
     };
 
+    let bg = state.config.theme.background;
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(|_theme| container::Style {
-            background: Some(Background::Color(Color {
-                r: 0.08,
-                g: 0.08,
-                b: 0.12,
-                a: 0.92,
-            })),
-            border: Border {
-                radius: 16.0.into(),
-                ..Default::default()
-            },
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border { radius: 16.0.into(), ..Default::default() },
             ..Default::default()
         })
         .into()
@@ -220,6 +250,7 @@ pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
         ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
         ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
         ActiveComponent::CommandResult => state.command_result.subscription().map(Message::CommandResult),
+        ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
     };
     Subscription::batch([events, component])
 }

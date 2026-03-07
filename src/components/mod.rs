@@ -4,3 +4,4 @@ pub mod app_launcher;
 pub mod command;
 pub mod command_result;
 pub mod component;
+pub mod settings;

@@ -8,6 +8,7 @@ mod app;
 mod components;
 mod config;
 mod launcher;
+mod theme;
 mod ui;
 
 fn main() -> iced_layershell::Result {

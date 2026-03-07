@@ -5,7 +5,7 @@ use iced::{
     keyboard::{self, key::Named, Key},
     time,
     widget::{button, column, container, row, text},
-    Color, Element, Event, Length, Subscription, Task,
+    Element, Event, Length, Subscription, Task,
 };
 use std::time::Duration;
 
@@ -92,9 +92,13 @@ impl AppLauncher {
         self.query.push_str(&c);
 
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
-            self.query.clear();
-            self.apply_filter(apps, "");
-            return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+            // Only auto-dispatch pure navigation commands on space; commands
+            // that take arguments (Theme, Unknown) wait for Enter.
+            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config) {
+                self.query.clear();
+                self.apply_filter(apps, "");
+                return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+            }
         }
 
         let q = self.query.clone();
@@ -216,9 +220,11 @@ impl Component for AppLauncher {
         match msg {
             Msg::QueryChanged(s) => {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
-                    self.query = String::new();
-                    self.apply_filter(apps, "");
-                    return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config) {
+                        self.query = String::new();
+                        self.apply_filter(apps, "");
+                        return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
+                    }
                 }
                 self.apply_filter(apps, &s);
                 self.query = s;
@@ -251,9 +257,9 @@ impl Component for AppLauncher {
         let dots: Vec<Element<'_, Msg>> = (0..total_pages)
             .map(|i| {
                 let color = if i == self.page {
-                    Color::WHITE
+                    config.theme.dot_active
                 } else {
-                    Color { r: 1.0, g: 1.0, b: 1.0, a: 0.35 }
+                    config.theme.dot_inactive
                 };
                 button(text("●").size(10).color(color))
                     .on_press(Msg::GoToPage(i))
@@ -275,7 +281,7 @@ impl Component for AppLauncher {
         });
 
         let content = column![
-            search_bar(&self.query, &self.shake, SearchIcon::Search, Msg::QueryChanged),
+            search_bar(&self.query, &self.shake, SearchIcon::Search, &config.theme, Msg::QueryChanged),
             app_grid(apps, page_slice, config, highlighted, Msg::AppActivated),
             pagination,
         ]

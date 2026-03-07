@@ -223,7 +223,7 @@ impl Component for AIAgent {
         let selected_label = model_labels.get(self.selected_model).cloned();
 
         let content = iced::widget::column![
-            search_bar(&self.query, &self.shake, SearchIcon::Robot, Msg::QueryChanged),
+            search_bar(&self.query, &self.shake, SearchIcon::Robot, &config.theme, Msg::QueryChanged),
             ai_panel(
                 &self.status,
                 &self.prompt,
@@ -231,6 +231,7 @@ impl Component for AIAgent {
                 &self.response_items,
                 model_labels,
                 selected_label,
+                &config.theme,
                 Msg::CopyResponse,
                 Msg::Retry,
                 Msg::LinkClicked,

@@ -19,11 +19,6 @@ const COPY_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
 </svg>"#;
 
-// Terminal colour palette
-const C_PROMPT:  Color = Color { r: 0.40, g: 0.85, b: 0.40, a: 1.0 }; // green
-const C_OUTPUT:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 }; // light grey
-const C_BG:      Color = Color { r: 0.04, g: 0.04, b: 0.06, a: 1.0 }; // near-black
-
 pub struct CommandResult {
     /// Current text in the search bar — editable, cleared after each command.
     query: String,
@@ -184,7 +179,9 @@ impl Component for CommandResult {
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn view<'a>(&'a self, _apps: &'a [AppEntry], _config: &'a Config) -> Element<'a, Msg> {
+    fn view<'a>(&'a self, _apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
+        let (btn_bg, feedback_color) = (config.theme.button_background, config.theme.copy_feedback);
+
         // ── Copy button ───────────────────────────────────────────────────────
         let copy_icon = svg(svg::Handle::from_memory(COPY_ICON.to_vec()))
             .width(16)
@@ -193,17 +190,14 @@ impl Component for CommandResult {
         let copy_btn = button(copy_icon)
             .on_press(Msg::Copy)
             .padding(8)
-            .style(|_theme, _status| button::Style {
-                background: Some(Background::Color(Color { r: 1.0, g: 1.0, b: 1.0, a: 0.10 })),
+            .style(move |_theme, _status| button::Style {
+                background: Some(Background::Color(btn_bg)),
                 border: Border { radius: 6.0.into(), ..Default::default() },
                 ..Default::default()
             });
 
         let feedback: Element<'a, Msg> = if self.copy_feedback {
-            text("Copied to clipboard")
-                .size(13)
-                .color(Color { r: 0.5, g: 0.9, b: 0.6, a: 1.0 })
-                .into()
+            text("Copied to clipboard").size(13).color(feedback_color).into()
         } else {
             text("").size(13).into()
         };
@@ -221,7 +215,7 @@ impl Component for CommandResult {
             text(format!("$ {}", self.last_prefix))
                 .font(Font::MONOSPACE)
                 .size(14)
-                .color(C_PROMPT)
+                .color(config.theme.terminal_prompt)
                 .into()
         } else {
             Space::new().width(0).height(0).into()
@@ -230,17 +224,18 @@ impl Component for CommandResult {
         let output_text = text(&self.output)
             .font(Font::MONOSPACE)
             .size(14)
-            .color(C_OUTPUT);
+            .color(config.theme.terminal_output);
 
         let terminal_body = column![prompt_line, output_text].spacing(6);
 
+        let term_bg = config.theme.terminal_background;
         let output_area = container(
             scrollable(container(terminal_body).width(Length::Fill).padding([0, 4]))
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .style(|_theme| container::Style {
-            background: Some(Background::Color(C_BG)),
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(term_bg)),
             border: Border { radius: 10.0.into(), ..Default::default() },
             ..Default::default()
         })
@@ -254,7 +249,7 @@ impl Component for CommandResult {
             .height(Length::Fill);
 
         column![
-            search_bar(&self.query, &self.shake, SearchIcon::Terminal, Msg::QueryChanged),
+            search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
             panel,
         ]
         .spacing(16)
