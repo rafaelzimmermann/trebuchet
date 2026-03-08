@@ -131,7 +131,8 @@ fi
 
 UPDATE_ICONS=false
 if $FETCH_ICONS; then
-    if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]]; then
+    if [[ -d assets/icons && -n "$(ls -A assets/icons 2>/dev/null)" ]] \
+            && [[ -f assets/icons/manifest.json ]]; then
         if confirm "Icons already exist. Update them?"; then
             UPDATE_ICONS=true
         fi

@@ -7,6 +7,7 @@ use iced_layershell::{
 mod app;
 mod components;
 mod config;
+mod icons;
 mod launcher;
 mod theme;
 mod ui;

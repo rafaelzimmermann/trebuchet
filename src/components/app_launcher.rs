@@ -92,7 +92,7 @@ impl AppLauncher {
         self.query.push_str(&c);
 
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
-            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
+            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
                 self.query.clear();
                 self.apply_filter(apps, "");
                 return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -165,7 +165,7 @@ impl Component for AppLauncher {
             Key::Named(Named::Enter) => {
                 let trimmed = self.query.trim().to_string();
                 if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
-                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
+                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
                         self.query.clear();
                         self.apply_filter(apps, "");
                         return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -222,7 +222,7 @@ impl Component for AppLauncher {
         match msg {
             Msg::QueryChanged(s) => {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
-                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd) {
+                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
                         self.query = String::new();
                         self.apply_filter(apps, "");
                         return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));

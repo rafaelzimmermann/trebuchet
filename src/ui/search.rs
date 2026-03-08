@@ -8,6 +8,7 @@ use crate::theme::Theme;
 const SEARCH_ID_LAUNCHER:  &str = "trebuchet_search_launcher";
 const SEARCH_ID_AI:        &str = "trebuchet_search_ai";
 const SEARCH_ID_TERMINAL:  &str = "trebuchet_search_terminal";
+const SEARCH_ID_WINDOW:    &str = "trebuchet_search_window";
 
 const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
   fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -30,6 +31,15 @@ const TERMINAL_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox=
   <rect x="2" y="3" width="20" height="16" rx="2"/>
   <polyline points="6,8 10,12 6,16"/>
   <line x1="13" y1="16" x2="19" y2="16"/>
+</svg>"#;
+
+const WINDOW_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="2" y="3" width="20" height="16" rx="2"/>
+  <line x1="2" y1="8" x2="22" y2="8"/>
+  <circle cx="5.5" cy="5.5" r="1" fill="white" stroke="none"/>
+  <circle cx="8.5" cy="5.5" r="1" fill="white" stroke="none"/>
+  <polyline points="10,13 12,15 16,11"/>
 </svg>"#;
 
 const SHAKE_OFFSETS: [f32; 6] = [-8.0, 8.0, -5.0, 5.0, -2.0, 0.0];
@@ -58,6 +68,7 @@ pub enum SearchIcon {
     Search,
     Robot,
     Terminal,
+    Window,
 }
 
 pub fn search_bar<'a, Msg: Clone + 'a>(
@@ -71,6 +82,7 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         SearchIcon::Search   => (SEARCH_SVG,   SEARCH_ID_LAUNCHER),
         SearchIcon::Robot    => (ROBOT_SVG,    SEARCH_ID_AI),
         SearchIcon::Terminal => (TERMINAL_SVG, SEARCH_ID_TERMINAL),
+        SearchIcon::Window   => (WINDOW_SVG,   SEARCH_ID_WINDOW),
     };
     let icon_widget: Element<'a, Msg> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(20)
@@ -81,6 +93,7 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         SearchIcon::Search   => "Search apps...",
         SearchIcon::Robot    => "Ask anything...",
         SearchIcon::Terminal => "",
+        SearchIcon::Window   => "Search windows...",
     };
     let (text_color, placeholder_color, selection_color) =
         (theme.search_text, theme.search_placeholder, theme.search_selection);

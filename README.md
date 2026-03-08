@@ -19,6 +19,7 @@ https://github.com/user-attachments/assets/117d5e0b-9064-4bc3-b002-a6ce9533ec2c
 - Escape to close
 - Launches on the active screen
 - Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model; switch between configured models on the fly with the bottom-left picker
+- Window mover — type `/mv` to pull a window from another workspace into the current one
 - Custom commands — define shell shortcuts in config (e.g. `/shutdown`, `/uptime`) with optional output display
 
 
@@ -81,6 +82,11 @@ These icons take priority over the system icon theme at runtime, so lower-resolu
 or missing system icons are automatically covered. The fetched files are excluded from
 version control (see `.gitignore`).
 
+The script also generates `assets/icons/manifest.json` by scanning your installed
+`.desktop` files. The manifest records icon aliases (`wm_class`, `icon_name`, `app_name`)
+so the window mover can match running windows to their icons even when the WM class
+doesn't match the icon filename (e.g. VS Code's WM class `Code` → `code.svg`).
+
 If you have Papirus installed (`pacman -S papirus-icon-theme` / `apt install papirus-icon-theme`),
 the script works entirely offline.
 
@@ -99,6 +105,7 @@ cargo run --release
 | Enter | Launch selected application |
 | Click | Launch application |
 | `/ai <question>` + Enter | Switch to AI assistant |
+| `/mv` + Space or Enter | Open window mover |
 | `/cmd` + Space or Enter | Open custom command runner |
 | `/config` + Space or Enter | Open settings panel |
 | `/app` + Space or Enter | Return to app grid from any panel |
@@ -168,6 +175,21 @@ ai_provider = anthropic
 ai_api_key  = sk-ant-...
 ai_model    = claude-sonnet-4-6
 ```
+
+## Window mover
+
+Type `/mv` (then Space or Enter) to switch to the window mover. It shows all open windows on other workspaces in the same grid layout as the app launcher.
+
+```
+/mv          → show all windows on other workspaces
+/mv fire     → show windows matching "fire" (filters by title and class)
+```
+
+Each cell shows the app icon and a `workspace:title` label. As you hover or navigate with the keyboard the full label is shown at the bottom of the panel.
+
+Selecting a window with Enter or a click moves it silently to your current workspace and closes the launcher. **Escape** returns to the app grid without moving anything.
+
+Windows are ordered by workspace ID, then left-to-right by position within each workspace.
 
 ## Settings panel
 

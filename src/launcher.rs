@@ -1,19 +1,6 @@
 use std::path::PathBuf;
 
-use iced::widget::{image, svg};
-use rust_embed::RustEmbed;
-
-/// Icons bundled into the binary at compile time from `assets/icons/`.
-#[derive(RustEmbed)]
-#[folder = "assets/icons/"]
-struct EmbeddedIcons;
-
-/// A resolved, ready-to-render icon handle.
-#[derive(Clone)]
-pub enum IconHandle {
-    Vector(svg::Handle),
-    Raster(image::Handle),
-}
+use crate::icons::{self, IconHandle};
 
 #[derive(Clone)]
 pub struct AppEntry {
@@ -80,10 +67,10 @@ pub fn scan_applications() -> Vec<AppEntry> {
             // opaque icon names (chrome-<hash>-Default) that point to low-res
             // PNGs.  If the system lookup didn't yield a vector, try the
             // embedded icons by normalising the app's display name.
-            let system_icon = desktop.icon().and_then(resolve_icon);
+            let system_icon = desktop.icon().and_then(icons::resolve_icon);
             let icon = match &system_icon {
                 Some(IconHandle::Vector(_)) => system_icon,
-                _ => try_embedded_by_name(&name).or(system_icon),
+                _ => icons::try_embedded_by_name(&name).or(system_icon),
             };
 
             let terminal = content.lines().any(|l| l.trim() == "Terminal=true");
@@ -100,102 +87,6 @@ pub fn scan_applications() -> Vec<AppEntry> {
         }
     });
     entries
-}
-
-/// Return candidate icon filenames (without extension) derived from an app's
-/// display name, in preference order.  Duplicates are suppressed.
-///
-/// Examples:
-///   "WhatsApp Web" → ["whatsapp-web", "whatsappweb", "whatsapp"]
-///   "Google Gemini" → ["google-gemini", "googlegemini"]
-///   "Claude"        → ["claude"]
-pub(crate) fn name_candidates(name: &str) -> Vec<String> {
-    let base = name.to_lowercase();
-    let stripped = base.replace(" web", "");
-    let stripped = stripped.trim();
-    let mut seen = std::collections::HashSet::new();
-    let raw = [
-        base.replace(' ', "-"),
-        base.replace(' ', ""),
-        stripped.replace(' ', "-"),
-        stripped.replace(' ', ""),
-    ];
-    raw.into_iter()
-        .filter(|s| !s.is_empty() && seen.insert(s.clone()))
-        .collect()
-}
-
-/// Try to find an embedded icon by normalising the app's display name.
-fn try_embedded_by_name(name: &str) -> Option<IconHandle> {
-    for candidate in name_candidates(name) {
-        for ext in ["svg", "png"] {
-            let filename = format!("{candidate}.{ext}");
-            if let Some(file) = EmbeddedIcons::get(&filename) {
-                let data: Vec<u8> = file.data.into_owned();
-                return Some(if ext == "svg" {
-                    IconHandle::Vector(svg::Handle::from_memory(data))
-                } else {
-                    IconHandle::Raster(image::Handle::from_bytes(data))
-                });
-            }
-        }
-    }
-    None
-}
-
-fn resolve_icon(icon_name: &str) -> Option<IconHandle> {
-    // 1. Embedded assets (compiled into the binary).
-    for ext in ["svg", "png"] {
-        let filename = format!("{icon_name}.{ext}");
-        if let Some(file) = EmbeddedIcons::get(&filename) {
-            let data: Vec<u8> = file.data.into_owned();
-            return Some(if ext == "svg" {
-                IconHandle::Vector(svg::Handle::from_memory(data))
-            } else {
-                IconHandle::Raster(image::Handle::from_bytes(data))
-            });
-        }
-    }
-
-    // 2. Absolute path in the .desktop file.
-    let p = PathBuf::from(icon_name);
-    if p.is_absolute() && p.exists() {
-        return Some(path_handle(&p));
-    }
-
-    // 3. System icon theme directories.
-    let home = std::env::var("HOME").unwrap_or_default();
-    let system_dirs = [
-        format!("{home}/.local/share/icons/hicolor/scalable/apps"),
-        format!("{home}/.local/share/icons/hicolor/96x96/apps"),
-        format!("{home}/.local/share/icons/hicolor/64x64/apps"),
-        format!("{home}/.local/share/icons/hicolor/48x48/apps"),
-        format!("{home}/.local/share/icons"),
-        "/usr/share/icons/hicolor/scalable/apps".to_string(),
-        "/usr/share/icons/hicolor/96x96/apps".to_string(),
-        "/usr/share/icons/hicolor/64x64/apps".to_string(),
-        "/usr/share/icons/hicolor/48x48/apps".to_string(),
-        "/usr/share/pixmaps".to_string(),
-    ];
-
-    for dir in &system_dirs {
-        for ext in ["svg", "png"] {
-            let candidate = PathBuf::from(dir).join(format!("{icon_name}.{ext}"));
-            if candidate.exists() {
-                return Some(path_handle(&candidate));
-            }
-        }
-    }
-
-    None
-}
-
-fn path_handle(path: &PathBuf) -> IconHandle {
-    if path.extension().and_then(|e| e.to_str()) == Some("svg") {
-        IconHandle::Vector(svg::Handle::from_path(path))
-    } else {
-        IconHandle::Raster(image::Handle::from_path(path))
-    }
 }
 
 /// Strip desktop entry field codes (§ 4 of the spec) from an Exec value.
@@ -262,48 +153,7 @@ pub fn launch_app(exec: &str, terminal: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_exec, name_candidates};
-
-    // ── name_candidates ───────────────────────────────────────────────────────
-
-    #[test]
-    fn simple_name_lowercased() {
-        assert_eq!(name_candidates("Claude"), vec!["claude"]);
-    }
-
-    #[test]
-    fn two_word_name_produces_dash_and_joined() {
-        assert_eq!(
-            name_candidates("Google Gemini"),
-            vec!["google-gemini", "googlegemini"]
-        );
-    }
-
-    #[test]
-    fn web_suffix_stripped() {
-        // "WhatsApp Web" → whatsapp-web, whatsappweb, whatsapp (no dup)
-        let c = name_candidates("WhatsApp Web");
-        assert_eq!(c, vec!["whatsapp-web", "whatsappweb", "whatsapp"]);
-    }
-
-    #[test]
-    fn web_suffix_only_entry_doesnt_produce_empty() {
-        // "Web" alone strips to "" which should be filtered out
-        let c = name_candidates("Web");
-        assert!(!c.contains(&String::new()));
-    }
-
-    #[test]
-    fn no_duplicates_when_stripped_matches_original() {
-        // "OpenAI" has no spaces so dash/joined variants are the same
-        let c = name_candidates("OpenAI");
-        assert_eq!(c, vec!["openai"]);
-    }
-
-    #[test]
-    fn single_word_no_web() {
-        assert_eq!(name_candidates("Spotify"), vec!["spotify"]);
-    }
+    use super::clean_exec;
 
     #[test]
     fn strips_common_field_codes() {

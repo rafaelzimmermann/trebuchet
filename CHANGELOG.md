@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-08
+
+### Added
+- **Window mover** (`/mv`): type `/mv` (then Space or Enter) to switch to a window picker showing all open windows on other workspaces. Navigate with arrow keys or hover, then press Enter or click to move the selected window silently to the current workspace and close the launcher. An optional query after `/mv` filters by title and class. Escape returns to the app grid.
+- **Icon manifest**: `fetch-icons.sh` now generates `assets/icons/manifest.json` by scanning installed `.desktop` files for `Icon=`, `Name=`, and `StartupWMClass=` fields. The manifest records `wm_class`, `icon_name`, and `app_name` aliases for each embedded icon, enabling reliable icon resolution when the WM class, desktop icon name, or display name differs from the embedded filename.
+- **`src/icons.rs`** shared module: all icon infrastructure (`IconHandle`, `FALLBACK_ICON`, embedded-asset lookup, `icon_for_window`) extracted into a single module used by both the app launcher and window mover, removing duplicated code.
+
+### Fixed
+- VS Code icon now resolves correctly in the window mover. The `.desktop` file's `StartupWMClass=Code` is captured in the manifest and maps to the embedded `code.svg`; `fetch-icons.sh` now fetches the icon under its correct Papirus name (`visual-studio-code`).
+- Icon lookup for reverse-DNS WM classes (e.g. `com.mitchellh.ghostty`) now also checks the window's `initialTitle` display name and the last dot-segment as additional fallbacks.
+- `resolve_icon` expands system-directory searches with manifest `icon_name` aliases, so a class-based lookup can find an icon installed under a different name.
+
+### Changed
+- `fetch-icons.sh` manifest generation scans all `.desktop` files once (single pass) instead of once per icon, making it significantly faster.
+- Manifest now covers all embedded icons (not just those with non-trivial aliases), making it a complete catalog of bundled assets.
+- `install.sh` always regenerates `manifest.json` when icons are present but the manifest is missing (e.g. upgrading from 0.3.x), without prompting the user.
+
 ## [0.3.1] - 2026-03-07
 
 ### Fixed

@@ -13,6 +13,7 @@ use crate::components::cmd::{self, Cmd};
 use crate::components::command::{ComponentEvent, SlashCommand};
 use crate::components::component::Component;
 use crate::components::settings::{self, Settings};
+use crate::components::window_mover::{self, WindowMover};
 use crate::config::Config;
 use crate::launcher::{scan_applications, AppEntry};
 // ── Active component ──────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ pub enum ActiveComponent {
     Ai,
     Cmd,
     Settings,
+    WindowMover,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -35,6 +37,7 @@ pub struct Trebuchet {
     pub ai_agent: AIAgent,
     pub cmd: Cmd,
     pub settings: Settings,
+    pub window_mover: WindowMover,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -50,6 +53,7 @@ pub enum Message {
     Ai(ai_agent::Msg),
     Cmd(cmd::Msg),
     Settings(settings::Msg),
+    WindowMover(window_mover::Msg),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -65,6 +69,7 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         ai_agent: AIAgent::new(),
         cmd: Cmd::new(),
         settings: Settings::new(),
+        window_mover: WindowMover::new(),
     };
     (state, Task::none())
 }
@@ -87,7 +92,7 @@ fn persist_theme(name: &str) {
 
 // ── Event application ─────────────────────────────────────────────────────────
 
-fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
+fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
     match event {
         ComponentEvent::Handled => {}
         ComponentEvent::Exit => std::process::exit(0),
@@ -114,10 +119,16 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) {
             state.active = ActiveComponent::Cmd;
             state.cmd.reset();
         }
+        ComponentEvent::CommandInvoked(SlashCommand::Mv, args) => {
+            state.active = ActiveComponent::WindowMover;
+            let task = state.window_mover.reset(args);
+            return task.map(Message::WindowMover);
+        }
         // No component currently produces CommandInvoked(Unknown) — unknown
         // slash commands are handled locally (shake) in each component.
         ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
     }
+    Task::none()
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -129,23 +140,28 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
 
         Message::Launcher(m) => {
             let (task, evt) = state.launcher.update(m, &state.apps, &state.config);
-            apply_event(state, evt);
-            return task.map(Message::Launcher);
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task.map(Message::Launcher), evt_task]);
         }
         Message::Ai(m) => {
             let (task, evt) = state.ai_agent.update(m, &state.apps, &state.config);
-            apply_event(state, evt);
-            return task.map(Message::Ai);
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task.map(Message::Ai), evt_task]);
         }
         Message::Cmd(m) => {
             let (task, evt) = state.cmd.update(m, &state.apps, &state.config);
-            apply_event(state, evt);
-            return task.map(Message::Cmd);
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task.map(Message::Cmd), evt_task]);
         }
         Message::Settings(m) => {
             let (task, evt) = state.settings.update(m, &state.apps, &state.config);
-            apply_event(state, evt);
-            return task.map(Message::Settings);
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task.map(Message::Settings), evt_task]);
+        }
+        Message::WindowMover(m) => {
+            let (task, evt) = state.window_mover.update(m, &state.apps, &state.config);
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task.map(Message::WindowMover), evt_task]);
         }
 
         Message::IcedEvent(event, status) => {
@@ -166,9 +182,13 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                     let (t, e) = state.settings.handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Settings), e)
                 }
+                ActiveComponent::WindowMover => {
+                    let (t, e) = state.window_mover.handle_event(&event, status, &state.apps, &state.config);
+                    (t.map(Message::WindowMover), e)
+                }
             };
-            apply_event(state, evt);
-            return task;
+            let evt_task = apply_event(state, evt);
+            return Task::batch([task, evt_task]);
         }
 
         // Extra variants injected by #[to_layer_message] (layershell protocol messages).
@@ -192,6 +212,9 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         }
         ActiveComponent::Settings => {
             state.settings.view(&state.apps, &state.config).map(Message::Settings)
+        }
+        ActiveComponent::WindowMover => {
+            state.window_mover.view(&state.apps, &state.config).map(Message::WindowMover)
         }
     };
 
@@ -269,6 +292,7 @@ pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
         ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
         ActiveComponent::Cmd => state.cmd.subscription().map(Message::Cmd),
         ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
+        ActiveComponent::WindowMover => state.window_mover.subscription().map(Message::WindowMover),
     };
     Subscription::batch([events, component])
 }

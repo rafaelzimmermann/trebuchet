@@ -3,21 +3,9 @@ use iced::{
     Alignment, Background, Border, Element, Length,
 };
 
-/// Fallback icon shown when no icon can be resolved for an app.
-/// A faint rounded square containing a 2×2 grid of tiles — evokes
-/// "application" without being tied to any specific look.
-const FALLBACK_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="6" y="6" width="52" height="52" rx="12"
-        fill="white" fill-opacity="0.06"
-        stroke="white" stroke-opacity="0.22" stroke-width="1.5"/>
-  <rect x="16" y="19" width="11" height="11" rx="2.5" fill="white" fill-opacity="0.32"/>
-  <rect x="31" y="19" width="11" height="11" rx="2.5" fill="white" fill-opacity="0.32"/>
-  <rect x="16" y="34" width="11" height="11" rx="2.5" fill="white" fill-opacity="0.32"/>
-  <rect x="31" y="34" width="11" height="11" rx="2.5" fill="white" fill-opacity="0.32"/>
-</svg>"#;
-
 use crate::config::Config;
-use crate::launcher::{AppEntry, IconHandle};
+use crate::icons::{IconHandle, FALLBACK_ICON};
+use crate::launcher::AppEntry;
 
 pub fn app_grid<'a, Msg: Clone + 'a>(
     apps: &'a [AppEntry],

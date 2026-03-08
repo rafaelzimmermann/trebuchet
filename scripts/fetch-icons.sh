@@ -183,6 +183,7 @@ remote_fetch_from_clone() {
 
 declare -A FETCH_AS=(
     [celluloid]="io.github.celluloid_player.Celluloid"
+    [code]="visual-studio-code"
     [epiphany]="org.gnome.Epiphany"
     [gnome-tweaks]="org.gnome.tweaks"
     [handbrake]="fr.handbrake.ghb"
@@ -190,6 +191,114 @@ declare -A FETCH_AS=(
     [pcmanfm]="system-file-manager"
     [totem]="org.gnome.Totem"
 )
+
+# ── Manifest generation ───────────────────────────────────────────────────────
+# Scans installed .desktop files once to build lookup tables, then writes
+# assets/icons/manifest.json for every fetched icon that has non-trivial metadata.
+
+DESKTOP_DIRS=(
+    "$HOME/.local/share/applications"
+    "/usr/share/applications"
+    "/usr/local/share/applications"
+)
+
+# Populated by scan_desktop_files() — keyed by Icon= field value.
+# Values are tab-separated lists of unique entries.
+declare -A DKTOP_NAMES=()   # icon → app display names
+declare -A DKTOP_WM=()      # icon → StartupWMClass values
+
+# Single pass over all .desktop files; results stored in DKTOP_NAMES / DKTOP_WM.
+scan_desktop_files() {
+    for desktop_dir in "${DESKTOP_DIRS[@]}"; do
+        [[ -d "$desktop_dir" ]] || continue
+        while IFS= read -r -d '' desktop_file; do
+            local icon="" name="" wm_class=""
+            while IFS='=' read -r key value; do
+                value="${value%$'\r'}"
+                case "$key" in
+                    Icon)           icon="$value" ;;
+                    Name)           [[ -z "$name" ]]     && name="$value" ;;
+                    StartupWMClass) [[ -z "$wm_class" ]] && wm_class="$value" ;;
+                esac
+            done < <(grep -E '^(Icon|Name|StartupWMClass)=' "$desktop_file" 2>/dev/null)
+
+            [[ -z "$icon" ]] && continue
+            if [[ -n "$name"     && "${DKTOP_NAMES[$icon]:-}" != *"$name"* ]]; then
+                DKTOP_NAMES["$icon"]+="${DKTOP_NAMES[$icon]:+$'\t'}$name"
+            fi
+            if [[ -n "$wm_class" && "${DKTOP_WM[$icon]:-}"   != *"$wm_class"* ]]; then
+                DKTOP_WM["$icon"]+="${DKTOP_WM[$icon]:+$'\t'}$wm_class"
+            fi
+        done < <(find "$desktop_dir" -maxdepth 2 -name '*.desktop' -print0 2>/dev/null)
+    done
+}
+
+json_str_array() {
+    local -n _items=$1
+    local first=true
+    printf '['
+    for item in "${_items[@]}"; do
+        [[ "$first" == true ]] && first=false || printf ', '
+        printf '"%s"' "${item//\"/\\\"}"
+    done
+    printf ']'
+}
+
+generate_manifest() {
+    local out="$DEST/manifest.json"
+    local first_entry=true
+    local count=0
+
+    scan_desktop_files
+
+    {
+        printf '[\n'
+        for name in "${ICONS[@]}"; do
+            local file=""
+            [[ -f "$DEST/$name.svg" ]] && file="$name.svg"
+            [[ -z "$file" && -f "$DEST/$name.png" ]] && file="$name.png"
+            [[ -z "$file" ]] && continue
+
+            # icon_name: save-name + FETCH_AS alias (if different)
+            local -a icon_names=("$name")
+            local fetch_alias="${FETCH_AS[$name]:-}"
+            [[ -n "$fetch_alias" && "$fetch_alias" != "$name" ]] && icon_names+=("$fetch_alias")
+
+            # Gather metadata via O(1) table lookup for each alias
+            local -a app_names=() wm_classes=()
+            for lookup in "${icon_names[@]}"; do
+                if [[ -n "${DKTOP_NAMES[$lookup]:-}" ]]; then
+                    local -a _n; IFS=$'\t' read -r -a _n <<< "${DKTOP_NAMES[$lookup]}"
+                    for n in "${_n[@]}"; do
+                        local dup=false
+                        for e in "${app_names[@]+"${app_names[@]}"}"; do [[ "$e" == "$n" ]] && dup=true && break; done
+                        $dup || app_names+=("$n")
+                    done
+                fi
+                if [[ -n "${DKTOP_WM[$lookup]:-}" ]]; then
+                    local -a _w; IFS=$'\t' read -r -a _w <<< "${DKTOP_WM[$lookup]}"
+                    for w in "${_w[@]}"; do
+                        local dup=false
+                        for e in "${wm_classes[@]+"${wm_classes[@]}"}"; do [[ "$e" == "$w" ]] && dup=true && break; done
+                        $dup || wm_classes+=("$w")
+                    done
+                fi
+            done
+
+            [[ "$first_entry" == true ]] && first_entry=false || printf ',\n'
+            printf '  {\n'
+            printf '    "file": "%s"' "$file"
+            [[ ${#wm_classes[@]} -gt 0 ]] && { printf ',\n    "wm_class": '; json_str_array wm_classes; }
+            printf ',\n    "icon_name": '; json_str_array icon_names
+            [[ ${#app_names[@]}  -gt 0 ]] && { printf ',\n    "app_name": ';  json_str_array app_names; }
+            printf '\n  }'
+            (( count++ )) || true
+        done
+        printf '\n]\n'
+    } > "$out"
+
+    echo "Manifest: $out  ($count entries)"
+}
 
 # ── Per-icon fetch orchestration ──────────────────────────────────────────────
 
@@ -332,3 +441,6 @@ fail=$(find "$TMP" -name "fail_*" | wc -l)
 echo ""
 echo "Done.  ✓ $ok fetched   = $skip already existed   ✗ $fail not found"
 echo "Total: $(find "$DEST" \( -name '*.svg' -o -name '*.png' \) | wc -l) icons in $DEST"
+
+# ── Generate manifest ──────────────────────────────────────────────────────────
+generate_manifest

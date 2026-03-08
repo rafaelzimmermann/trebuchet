@@ -4,6 +4,7 @@ pub enum SlashCommand {
     App,
     Config,
     Cmd,
+    Mv,
     Unknown(String),
 }
 
@@ -22,6 +23,7 @@ impl SlashCommand {
                 "app"    => SlashCommand::App,
                 "config" => SlashCommand::Config,
                 "cmd"    => SlashCommand::Cmd,
+                "mv"     => SlashCommand::Mv,
                 s        => SlashCommand::Unknown(s.to_string()),
             },
             args,
@@ -37,6 +39,7 @@ impl SlashCommand {
             Some((Self::App, args))    => Some(ComponentEvent::CommandInvoked(Self::App, args)),
             Some((Self::Config, args)) => Some(ComponentEvent::CommandInvoked(Self::Config, args)),
             Some((Self::Cmd, args))    => Some(ComponentEvent::CommandInvoked(Self::Cmd, args)),
+            Some((Self::Mv, args))     => Some(ComponentEvent::CommandInvoked(Self::Mv, args)),
             _ => None,
         }
     }
