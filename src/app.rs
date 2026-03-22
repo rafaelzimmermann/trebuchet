@@ -48,6 +48,7 @@ pub enum Message {
     Close,
     /// Absorbs clicks anywhere inside the window so they don't propagate as Ignored.
     Absorb,
+    AppsLoaded(Vec<AppEntry>),
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Ai(ai_agent::Msg),
@@ -59,19 +60,21 @@ pub enum Message {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
-    let apps = scan_applications();
-    let launcher = AppLauncher::new(&apps);
     let state = Trebuchet {
-        apps,
+        apps: Vec::new(),
         config: Config::load(),
         active: ActiveComponent::Launcher,
-        launcher,
+        launcher: AppLauncher::new(&[]),
         ai_agent: AIAgent::new(),
         cmd: Cmd::new(),
         settings: Settings::new(),
         window_mover: WindowMover::new(),
     };
-    (state, Task::none())
+    let task = Task::perform(
+        async { tokio::task::spawn_blocking(scan_applications).await.unwrap_or_default() },
+        Message::AppsLoaded,
+    );
+    (state, task)
 }
 
 pub fn namespace() -> String {
@@ -108,8 +111,7 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
         }
         ComponentEvent::CommandInvoked(SlashCommand::App, _) => {
             state.active = ActiveComponent::Launcher;
-            let apps = state.apps.clone();
-            state.launcher.reset(&apps);
+            state.launcher.reset(&state.apps);
         }
         ComponentEvent::CommandInvoked(SlashCommand::Config, _) => {
             state.active = ActiveComponent::Settings;
@@ -137,6 +139,11 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     match msg {
         Message::Close => std::process::exit(0),
         Message::Absorb => {}
+
+        Message::AppsLoaded(apps) => {
+            state.launcher.reset(&apps);
+            state.apps = apps;
+        }
 
         Message::Launcher(m) => {
             let (task, evt) = state.launcher.update(m, &state.apps, &state.config);

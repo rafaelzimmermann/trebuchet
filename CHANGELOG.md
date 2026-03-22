@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-03-22
+
+### Performance
+- App scan moved off the main thread: `scan_applications()` now runs via `tokio::task::spawn_blocking`, so the launcher window appears immediately on launch instead of blocking until all desktop entries and icons are resolved
+- Desktop entry processing parallelised with Rayon: parsing, icon resolution, and filesystem stat calls for all `.desktop` files now run concurrently across the thread pool
+
+### Changed
+- `icon_btn` and `COPY_ICON` consolidated — the duplicate definitions in `ai_response.rs` are removed; both now import from `ui::panel`
+- Removed unnecessary `Vec<AppEntry>` clone when switching back to the app launcher via `/app`
+
 ## [0.4.0] - 2026-03-08
 
 ### Added

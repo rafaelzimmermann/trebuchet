@@ -11,18 +11,26 @@ pub const COPY_ICON: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox
 </svg>"#;
 
 /// Small icon button used in the action bar of terminal-style panels.
-pub fn icon_btn<'a, Msg: Clone + 'a>(
+pub(crate) fn icon_btn<'a, Msg: Clone + 'a>(
     icon_bytes: &'static [u8],
     msg: Msg,
     enabled: bool,
     btn_bg: Color,
 ) -> iced::widget::Button<'a, Msg> {
-    let icon_color = Color { a: if enabled { 1.0 } else { 0.35 }, ..Color::WHITE };
-    let bg = Color { a: if enabled { btn_bg.a } else { btn_bg.a * 0.4 }, ..btn_bg };
+    let icon_color = Color {
+        a: if enabled { 1.0 } else { 0.35 },
+        ..Color::WHITE
+    };
+    let bg = Color {
+        a: if enabled { btn_bg.a } else { btn_bg.a * 0.4 },
+        ..btn_bg
+    };
     let icon = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(16)
         .height(16)
-        .style(move |_theme, _status| svg::Style { color: Some(icon_color) });
+        .style(move |_theme, _status| svg::Style {
+            color: Some(icon_color),
+        });
     // Always register on_press so the button consumes the click even when
     // visually disabled. Without it, the click leaks as Status::Ignored and
     // app.rs interprets that as a background click, closing the launcher.
@@ -30,7 +38,10 @@ pub fn icon_btn<'a, Msg: Clone + 'a>(
         .padding(8)
         .style(move |_theme, _status| button::Style {
             background: Some(Background::Color(bg)),
-            border: Border { radius: 6.0.into(), ..Default::default() },
+            border: Border {
+                radius: 6.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .on_press(msg)

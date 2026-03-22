@@ -78,21 +78,23 @@ impl AppLauncher {
             return;
         }
         let current = self.selected.unwrap_or(self.page * page_size);
-        let next = (current as isize + delta)
-            .clamp(0, self.filtered.len() as isize - 1) as usize;
+        let next = (current as isize + delta).clamp(0, self.filtered.len() as isize - 1) as usize;
         self.selected = Some(next);
         self.page = next / page_size;
     }
 
-    fn handle_char(
-        &mut self,
-        c: String,
-        apps: &[AppEntry],
-    ) -> (Task<Msg>, ComponentEvent) {
+    fn handle_char(&mut self, c: String, apps: &[AppEntry]) -> (Task<Msg>, ComponentEvent) {
         self.query.push_str(&c);
 
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
-            if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
+            if matches!(
+                cmd,
+                SlashCommand::Ai
+                    | SlashCommand::App
+                    | SlashCommand::Config
+                    | SlashCommand::Cmd
+                    | SlashCommand::Mv
+            ) {
                 self.query.clear();
                 self.apply_filter(apps, "");
                 return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -123,7 +125,7 @@ impl AppLauncher {
         if let Some(sel) = self.selected {
             if let Some(&app_idx) = self.filtered.get(sel) {
                 if let Some(app) = apps.get(app_idx) {
-                    launch_app(&app.exec.clone(), app.terminal);
+                    launch_app(&app.exec, app.terminal);
                     std::process::exit(0);
                 }
             }
@@ -144,7 +146,6 @@ impl AppLauncher {
         }
         ComponentEvent::Handled
     }
-
 }
 
 impl Component for AppLauncher {
@@ -157,7 +158,12 @@ impl Component for AppLauncher {
         apps: &[AppEntry],
         config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            ..
+        }) = event
         else {
             return (Task::none(), ComponentEvent::Handled);
         };
@@ -165,7 +171,14 @@ impl Component for AppLauncher {
             Key::Named(Named::Enter) => {
                 let trimmed = self.query.trim().to_string();
                 if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
-                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
+                    if matches!(
+                        cmd,
+                        SlashCommand::Ai
+                            | SlashCommand::App
+                            | SlashCommand::Config
+                            | SlashCommand::Cmd
+                            | SlashCommand::Mv
+                    ) {
                         self.query.clear();
                         self.apply_filter(apps, "");
                         return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -218,11 +231,23 @@ impl Component for AppLauncher {
         }
     }
 
-    fn update(&mut self, msg: Msg, apps: &[AppEntry], config: &Config) -> (Task<Msg>, ComponentEvent) {
+    fn update(
+        &mut self,
+        msg: Msg,
+        apps: &[AppEntry],
+        config: &Config,
+    ) -> (Task<Msg>, ComponentEvent) {
         match msg {
             Msg::QueryChanged(s) => {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
-                    if matches!(cmd, SlashCommand::Ai | SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv) {
+                    if matches!(
+                        cmd,
+                        SlashCommand::Ai
+                            | SlashCommand::App
+                            | SlashCommand::Config
+                            | SlashCommand::Cmd
+                            | SlashCommand::Mv
+                    ) {
                         self.query = String::new();
                         self.apply_filter(apps, "");
                         return (Task::none(), ComponentEvent::CommandInvoked(cmd, args));
@@ -279,12 +304,22 @@ impl Component for AppLauncher {
             .align_x(alignment::Horizontal::Center);
 
         let highlighted = self.selected.and_then(|s| {
-            if s >= start && s < end { Some(s - start) } else { None }
+            if s >= start && s < end {
+                Some(s - start)
+            } else {
+                None
+            }
         });
 
         container(
             column![
-                search_bar(&self.query, &self.shake, SearchIcon::Search, &config.theme, Msg::QueryChanged),
+                search_bar(
+                    &self.query,
+                    &self.shake,
+                    SearchIcon::Search,
+                    &config.theme,
+                    Msg::QueryChanged
+                ),
                 app_grid(apps, page_slice, config, highlighted, Msg::AppActivated),
                 pagination,
             ]
@@ -308,7 +343,11 @@ impl Component for AppLauncher {
 }
 
 fn pages(total: usize, page_size: usize) -> usize {
-    if page_size == 0 { 1 } else { total.div_ceil(page_size) }
+    if page_size == 0 {
+        1
+    } else {
+        total.div_ceil(page_size)
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -338,7 +377,12 @@ mod tests {
     }
 
     fn cfg() -> Config {
-        Config { columns: 3, rows: 2, icon_size: 64, ..Config::default() }
+        Config {
+            columns: 3,
+            rows: 2,
+            icon_size: 64,
+            ..Config::default()
+        }
     }
 
     // ── pages() ──────────────────────────────────────────────────────────────
@@ -380,8 +424,14 @@ mod tests {
     fn query_filters_by_name() {
         let (apps, mut launcher) = make_launcher(&["Firefox", "Files", "Terminal"]);
         launcher.apply_filter(&apps, "fire");
-        assert!(launcher.filtered.contains(&0), "Firefox should match 'fire'");
-        assert!(!launcher.filtered.contains(&2), "Terminal should not match 'fire'");
+        assert!(
+            launcher.filtered.contains(&0),
+            "Firefox should match 'fire'"
+        );
+        assert!(
+            !launcher.filtered.contains(&2),
+            "Terminal should not match 'fire'"
+        );
     }
 
     #[test]

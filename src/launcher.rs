@@ -1,8 +1,9 @@
+use rayon::prelude::*;
 use std::path::PathBuf;
 
 use crate::icons::{self, IconHandle};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AppEntry {
     pub name: String,
     pub exec: String,
@@ -11,7 +12,7 @@ pub struct AppEntry {
 }
 
 pub fn scan_applications() -> Vec<AppEntry> {
-    let mut entries = Vec::new();
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
 
     let mut dirs = vec![PathBuf::from("/usr/share/applications")];
     if let Ok(home) = std::env::var("HOME") {
@@ -38,28 +39,35 @@ pub fn scan_applications() -> Vec<AppEntry> {
                 Err(_) => continue,
             };
 
+            files.push((path, content));
+        }
+    }
+
+    let mut entries: Vec<AppEntry> = files
+        .par_iter()
+        .filter_map(|(path, content)| {
             let desktop = match freedesktop_desktop_entry::DesktopEntry::from_str(
-                &path,
-                &content,
+                path,
+                content,
                 None::<&[&str]>,
             ) {
                 Ok(d) => d,
-                Err(_) => continue,
+                Err(_) => return None,
             };
 
             if desktop.no_display() || desktop.hidden() {
-                continue;
+                return None;
             }
 
             let locales: &[&str] = &[];
             let name = match desktop.name(locales) {
                 Some(n) => n.to_string(),
-                None => continue,
+                None => return None,
             };
 
             let exec = match desktop.exec() {
                 Some(e) => e.to_string(),
-                None => continue,
+                None => return None,
             };
 
             // Prefer an embedded SVG (fetched by fetch-icons.sh) over whatever
@@ -75,9 +83,9 @@ pub fn scan_applications() -> Vec<AppEntry> {
 
             let terminal = content.lines().any(|l| l.trim() == "Terminal=true");
 
-            entries.push(AppEntry { name, exec, terminal, icon });
-        }
-    }
+            Some(AppEntry { name, exec, terminal, icon })
+        })
+        .collect();
 
     entries.sort_by(|a, b| {
         match (a.icon.is_some(), b.icon.is_some()) {
@@ -107,12 +115,12 @@ pub(crate) fn clean_exec(exec: &str) -> String {
 /// Most terminals use `-e`; wezterm uses `start --`.
 fn find_terminal() -> Option<(&'static str, &'static str)> {
     let candidates: &[(&str, &str)] = &[
-        ("foot",     "-e"),
-        ("kitty",    "-e"),
-        ("alacritty","-e"),
-        ("ghostty",  "-e"),
-        ("wezterm",  "start --"),
-        ("xterm",    "-e"),
+        ("foot", "-e"),
+        ("kitty", "-e"),
+        ("alacritty", "-e"),
+        ("ghostty", "-e"),
+        ("wezterm", "start --"),
+        ("xterm", "-e"),
     ];
     // Honour $TERMINAL if set and it matches one of the known candidates.
     if let Ok(t) = std::env::var("TERMINAL") {
@@ -120,13 +128,16 @@ fn find_terminal() -> Option<(&'static str, &'static str)> {
             return Some(entry);
         }
     }
-    candidates.iter().find(|(bin, _)| {
-        std::process::Command::new("sh")
-            .args(["-c", &format!("command -v {bin}")])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }).copied()
+    candidates
+        .iter()
+        .find(|(bin, _)| {
+            std::process::Command::new("sh")
+                .args(["-c", &format!("command -v {bin}")])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+        .copied()
 }
 
 /// Strip desktop field codes and spawn the application.
@@ -179,7 +190,10 @@ mod tests {
 
     #[test]
     fn no_field_codes_unchanged() {
-        assert_eq!(clean_exec("alacritty --title Launcher"), "alacritty --title Launcher");
+        assert_eq!(
+            clean_exec("alacritty --title Launcher"),
+            "alacritty --title Launcher"
+        );
     }
 
     #[test]

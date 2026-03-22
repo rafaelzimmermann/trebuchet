@@ -46,7 +46,7 @@ fn load_embedded(filename: &str) -> Option<IconHandle> {
 }
 
 /// A resolved, ready-to-render icon handle.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum IconHandle {
     Vector(svg::Handle),
     Raster(image::Handle),

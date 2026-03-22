@@ -4688,6 +4688,7 @@ dependencies = [
  "fuzzy-matcher",
  "iced",
  "iced_layershell",
+ "rayon",
  "reqwest",
  "rust-embed",
  "serde",
