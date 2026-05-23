@@ -2,46 +2,6 @@ use crate::theme::Theme;
 
 const DEFAULT_CONF: &str = include_str!("../assets/trebuchet.conf");
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum AiProvider {
-    #[default]
-    OpenAi,
-    Anthropic,
-    Gemini,
-    Ollama,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AiModelConfig {
-    pub provider: AiProvider,
-    pub api_key: Option<String>,
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-    /// Display label shown in the model picker — always `"provider:model"` or just `"provider"`.
-    pub label: String,
-}
-
-impl AiModelConfig {
-    fn build(
-        provider: AiProvider,
-        api_key: Option<String>,
-        model: Option<String>,
-        base_url: Option<String>,
-    ) -> Self {
-        let p = match &provider {
-            AiProvider::OpenAi    => "openai",
-            AiProvider::Anthropic => "anthropic",
-            AiProvider::Gemini    => "gemini",
-            AiProvider::Ollama    => "ollama",
-        };
-        let label = match &model {
-            Some(m) => format!("{p}:{m}"),
-            None    => p.to_string(),
-        };
-        Self { provider, api_key, model, base_url, label }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomCommand {
     pub prefix: String,
@@ -53,8 +13,6 @@ pub struct Config {
     pub columns: usize,
     pub rows: usize,
     pub icon_size: u32,
-    /// Ordered list of AI model configs. First entry is the default.
-    pub ai_models: Vec<AiModelConfig>,
     pub commands: Vec<CustomCommand>,
     pub theme: Theme,
 }
@@ -88,21 +46,6 @@ impl Config {
         let mut cur_display = false;
         let mut in_cmd_block = false;
 
-        // ── [[ai_model]] block state ──────────────────────────────────────────
-        let mut cur_ai_provider = AiProvider::default();
-        let mut cur_ai_api_key: Option<String> = None;
-        let mut cur_ai_model: Option<String> = None;
-        let mut cur_ai_base_url: Option<String> = None;
-        let mut in_ai_block = false;
-
-
-        // ── Legacy flat AI keys (backward compat) ─────────────────────────────
-        let mut legacy_provider: Option<AiProvider> = None;
-        let mut legacy_api_key: Option<String> = None;
-        let mut legacy_model: Option<String> = None;
-        let mut legacy_base_url: Option<String> = None;
-        let mut has_legacy_ai = false;
-
         let finalize_cmd = |base: &mut Config,
                             prefix: &mut String,
                             command: &mut String,
@@ -116,48 +59,19 @@ impl Config {
             }
         };
 
-        // Expand a comma-separated model string into one AiModelConfig per model.
-        // If no model is specified, one entry is created using the provider default.
-        let finalize_ai = |base: &mut Config,
-                           provider: &mut AiProvider,
-                           api_key: &mut Option<String>,
-                           model: &mut Option<String>,
-                           base_url: &mut Option<String>| {
-            let prov = std::mem::take(provider);
-            let key  = std::mem::take(api_key);
-            let url  = std::mem::take(base_url);
-            let models: Vec<Option<String>> = match std::mem::take(model) {
-                None => vec![None],
-                Some(s) => {
-                    let v: Vec<_> = s.split(',').map(|m| m.trim()).filter(|m| !m.is_empty())
-                        .map(|m| Some(m.to_string())).collect();
-                    if v.is_empty() { vec![None] } else { v }
-                }
-            };
-            for m in models {
-                base.ai_models.push(AiModelConfig::build(prov.clone(), key.clone(), m, url.clone()));
-            }
-        };
-
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             if line.starts_with('[') {
-                if in_ai_block {
-                    finalize_ai(&mut base, &mut cur_ai_provider, &mut cur_ai_api_key,
-                                &mut cur_ai_model, &mut cur_ai_base_url);
-                    in_ai_block = false;
-                }
                 if in_cmd_block {
                     finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
                     in_cmd_block = false;
                 }
                 match line {
-                    "[[command]]"  => in_cmd_block = true,
-                    "[[ai_model]]" => in_ai_block  = true,
-                    _              => {}
+                    "[[command]]" => in_cmd_block = true,
+                    _ => {}
                 }
                 continue;
             }
@@ -168,79 +82,23 @@ impl Config {
 
             if in_cmd_block {
                 match key {
-                    "prefix"         => { cur_prefix  = val.to_string(); continue; }
-                    "command"        => { cur_command  = val.to_string(); continue; }
-                    "display_result" => { cur_display  = val == "true";  continue; }
-                    _ => {}
-                }
-            }
-            if in_ai_block {
-                match key {
-                    "provider" => {
-                        cur_ai_provider = match val {
-                            "anthropic" => AiProvider::Anthropic,
-                            "gemini"    => AiProvider::Gemini,
-                            "ollama"    => AiProvider::Ollama,
-                            _           => AiProvider::OpenAi,
-                        };
-                        continue;
-                    }
-                    "api_key"  => { cur_ai_api_key  = Some(val.to_string()); continue; }
-                    "model"    => { cur_ai_model     = Some(val.to_string()); continue; }
-                    "base_url" => { if !val.is_empty() { cur_ai_base_url = Some(val.to_string()); } continue; }
+                    "prefix" => { cur_prefix = val.to_string(); continue; }
+                    "command" => { cur_command = val.to_string(); continue; }
+                    "display_result" => { cur_display = val == "true"; continue; }
                     _ => {}
                 }
             }
 
             match key {
-                "columns"   => { if let Ok(v) = val.parse() { base.columns   = v; } }
-                "rows"      => { if let Ok(v) = val.parse() { base.rows      = v; } }
+                "columns" => { if let Ok(v) = val.parse() { base.columns = v; } }
+                "rows" => { if let Ok(v) = val.parse() { base.rows = v; } }
                 "icon_size" => { if let Ok(v) = val.parse() { base.icon_size = v; } }
-                // Legacy single-config AI keys — kept for backward compatibility.
-                "ai_provider" => {
-                    legacy_provider = Some(match val {
-                        "anthropic" => AiProvider::Anthropic,
-                        "gemini"    => AiProvider::Gemini,
-                        "ollama"    => AiProvider::Ollama,
-                        _           => AiProvider::OpenAi,
-                    });
-                    has_legacy_ai = true;
-                }
-                "ai_api_key"  => { legacy_api_key  = Some(val.to_string()); has_legacy_ai = true; }
-                "ai_model"    => { legacy_model     = Some(val.to_string()); has_legacy_ai = true; }
-                "ai_base_url" => { if !val.is_empty() { legacy_base_url = Some(val.to_string()); has_legacy_ai = true; } }
                 _ => {}
             }
         }
 
         if in_cmd_block {
             finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
-        }
-        if in_ai_block {
-            finalize_ai(&mut base, &mut cur_ai_provider, &mut cur_ai_api_key,
-                        &mut cur_ai_model, &mut cur_ai_base_url);
-        }
-
-        // Legacy flat keys — expand comma-separated models, insert at front as defaults.
-        if has_legacy_ai {
-            let prov = legacy_provider.unwrap_or_default();
-            let models: Vec<Option<String>> = match legacy_model {
-                None => vec![None],
-                Some(s) => {
-                    let v: Vec<_> = s.split(',').map(|m| m.trim()).filter(|m| !m.is_empty())
-                        .map(|m| Some(m.to_string())).collect();
-                    if v.is_empty() { vec![None] } else { v }
-                }
-            };
-            let insert_at = base.ai_models.len();
-            for m in models {
-                base.ai_models.push(AiModelConfig::build(
-                    prov.clone(), legacy_api_key.clone(), m, legacy_base_url.clone(),
-                ));
-            }
-            // Rotate the newly added entries to the front.
-            let total = base.ai_models.len();
-            base.ai_models.rotate_right(total - insert_at);
         }
 
         base
@@ -259,7 +117,6 @@ impl Default for Config {
             columns: 7,
             rows: 5,
             icon_size: 96,
-            ai_models: Vec::new(),
             commands: Vec::new(),
             theme: Theme::default(),
         }
@@ -375,7 +232,7 @@ mod tests {
     #[test]
     fn command_blocks_accumulate_across_parse_layers() {
         let base = Config::parse(defaults(), "[[command]]\nprefix = /a\ncommand = echo a\n");
-        let cfg  = Config::parse(base, "[[command]]\nprefix = /b\ncommand = echo b\n");
+        let cfg = Config::parse(base, "[[command]]\nprefix = /b\ncommand = echo b\n");
         assert_eq!(cfg.commands.len(), 2);
     }
 
@@ -386,67 +243,5 @@ mod tests {
         assert_eq!(cfg.columns, 3);
         assert_eq!(cfg.rows, 2);
         assert_eq!(cfg.commands.len(), 1);
-    }
-
-    // ── [[ai_model]] blocks ───────────────────────────────────────────────────
-
-    #[test]
-    fn ai_model_block_parsed() {
-        let content = "[[ai_model]]\nprovider = anthropic\napi_key = sk-ant\nmodel = claude-sonnet-4-6\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 1);
-        assert_eq!(cfg.ai_models[0].provider, AiProvider::Anthropic);
-        assert_eq!(cfg.ai_models[0].api_key.as_deref(), Some("sk-ant"));
-        assert_eq!(cfg.ai_models[0].model.as_deref(), Some("claude-sonnet-4-6"));
-        assert_eq!(cfg.ai_models[0].label, "anthropic:claude-sonnet-4-6");
-    }
-
-    #[test]
-    fn ai_model_comma_list_expands() {
-        let content = "[[ai_model]]\nprovider = anthropic\napi_key = sk-ant\nmodel = claude-sonnet-4-6, claude-opus-4-6\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 2);
-        assert_eq!(cfg.ai_models[0].model.as_deref(), Some("claude-sonnet-4-6"));
-        assert_eq!(cfg.ai_models[0].label, "anthropic:claude-sonnet-4-6");
-        assert_eq!(cfg.ai_models[1].model.as_deref(), Some("claude-opus-4-6"));
-        assert_eq!(cfg.ai_models[1].label, "anthropic:claude-opus-4-6");
-        // Both share the same api_key
-        assert_eq!(cfg.ai_models[0].api_key, cfg.ai_models[1].api_key);
-    }
-
-    #[test]
-    fn multiple_ai_model_blocks() {
-        let content = "[[ai_model]]\nprovider = openai\nmodel = gpt-4o\n\n[[ai_model]]\nprovider = anthropic\nmodel = claude-sonnet-4-6\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 2);
-        assert_eq!(cfg.ai_models[0].provider, AiProvider::OpenAi);
-        assert_eq!(cfg.ai_models[1].provider, AiProvider::Anthropic);
-    }
-
-    #[test]
-    fn legacy_flat_keys_create_first_entry() {
-        let content = "ai_provider = anthropic\nai_api_key = sk-ant\nai_model = claude-sonnet-4-6\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 1);
-        assert_eq!(cfg.ai_models[0].provider, AiProvider::Anthropic);
-        assert_eq!(cfg.ai_models[0].label, "anthropic:claude-sonnet-4-6");
-    }
-
-    #[test]
-    fn legacy_flat_keys_comma_list_expands() {
-        let content = "ai_provider = openai\nai_api_key = sk\nai_model = gpt-4o, gpt-4-turbo\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 2);
-        assert_eq!(cfg.ai_models[0].label, "openai:gpt-4o");
-        assert_eq!(cfg.ai_models[1].label, "openai:gpt-4-turbo");
-    }
-
-    #[test]
-    fn legacy_keys_inserted_before_ai_model_blocks() {
-        let content = "ai_provider = openai\nai_model = gpt-4o\n\n[[ai_model]]\nprovider = anthropic\nmodel = claude-sonnet-4-6\n";
-        let cfg = Config::parse(defaults(), content);
-        assert_eq!(cfg.ai_models.len(), 2);
-        assert_eq!(cfg.ai_models[0].provider, AiProvider::OpenAi);
-        assert_eq!(cfg.ai_models[1].provider, AiProvider::Anthropic);
     }
 }

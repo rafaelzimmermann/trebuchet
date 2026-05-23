@@ -6,7 +6,6 @@ use iced::{
 use crate::theme::Theme;
 
 const SEARCH_ID_LAUNCHER:  &str = "trebuchet_search_launcher";
-const SEARCH_ID_AI:        &str = "trebuchet_search_ai";
 const SEARCH_ID_TERMINAL:  &str = "trebuchet_search_terminal";
 const SEARCH_ID_WINDOW:    &str = "trebuchet_search_window";
 
@@ -14,16 +13,6 @@ const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0
   fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="11" cy="11" r="7"/>
   <line x1="16.5" y1="16.5" x2="21" y2="21"/>
-</svg>"#;
-
-const ROBOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-  fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round">
-  <rect x="5" y="7" width="14" height="10" rx="2"/>
-  <line x1="12" y1="7" x2="12" y2="4"/>
-  <circle cx="12" cy="3.5" r="1"/>
-  <circle cx="9" cy="11" r="1.2" fill="white"/>
-  <circle cx="15" cy="11" r="1.2" fill="white"/>
-  <line x1="9" y1="14" x2="15" y2="14"/>
 </svg>"#;
 
 const TERMINAL_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -66,7 +55,6 @@ impl ShakeState {
 #[derive(Clone, Copy)]
 pub enum SearchIcon {
     Search,
-    Robot,
     Terminal,
     Window,
 }
@@ -80,7 +68,6 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
 ) -> Element<'a, Msg> {
     let (icon_bytes, search_id) = match icon {
         SearchIcon::Search   => (SEARCH_SVG,   SEARCH_ID_LAUNCHER),
-        SearchIcon::Robot    => (ROBOT_SVG,    SEARCH_ID_AI),
         SearchIcon::Terminal => (TERMINAL_SVG, SEARCH_ID_TERMINAL),
         SearchIcon::Window   => (WINDOW_SVG,   SEARCH_ID_WINDOW),
     };
@@ -91,7 +78,6 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
 
     let placeholder = match icon {
         SearchIcon::Search   => "Search apps...",
-        SearchIcon::Robot    => "Ask anything...",
         SearchIcon::Terminal => "",
         SearchIcon::Window   => "Search windows...",
     };
