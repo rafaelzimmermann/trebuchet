@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-23
+
+### Added
+- Architecture and design documentation (`docs/architecture.md`)
+
+### Removed
+- **AI assistant** (`/ai`): removed the built-in AI assistant and all associated code to focus trebuchet on its core purpose — app launching and window management
+  - Deleted `src/components/ai_agent.rs`, `src/components/ai_client.rs`, `src/ui/ai_response.rs`
+  - Removed `SlashCommand::Ai` variant and `/ai` routing
+  - Removed `AiProvider`, `AiModelConfig`, and all `[[ai_model]]` config parsing
+  - Removed `SearchIcon::Robot` and robot SVG from the search bar
+  - Removed `reqwest` dependency
+  - Removed AI assistant configuration section from default config
+
 ## [0.4.1] - 2026-03-22
 
 ### Performance
