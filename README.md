@@ -18,7 +18,6 @@ https://github.com/user-attachments/assets/117d5e0b-9064-4bc3-b002-a6ce9533ec2c
 - Terminal apps (`Terminal=true`) are auto-detected and launched in your terminal emulator
 - Escape to close
 - Launches on the active screen
-- Built-in AI assistant — type `/ai <question>` to query OpenAI, Anthropic, Gemini, or a local Ollama model; switch between configured models on the fly with the bottom-left picker
 - Window mover — type `/mv` to pull a window from another workspace into the current one
 - Custom commands — define shell shortcuts in config (e.g. `/shutdown`, `/uptime`) with optional output display
 
@@ -104,77 +103,11 @@ cargo run --release
 | Arrow keys | Move selection through the grid |
 | Enter | Launch selected application |
 | Click | Launch application |
-| `/ai <question>` + Enter | Switch to AI assistant |
 | `/mv` + Space or Enter | Open window mover |
 | `/cmd` + Space or Enter | Open custom command runner |
 | `/config` + Space or Enter | Open settings panel |
 | `/app` + Space or Enter | Return to app grid from any panel |
 | Escape | Return to app grid (from any panel) |
-
-## AI assistant
-
-Type `/ai` followed by your question to query an AI provider directly from the launcher.
-
-![AI assistant](assets/trebuchet-ai-assistent.png)
-
-```
-/ai what is a trebuchet
-/ai how do I centre a div in CSS
-```
-
-The search bar icon switches to a robot while you are in AI mode. The response is rendered as formatted markdown — headings, code blocks, bold text, and links are all styled. Clicking a link opens it in your browser. The **copy** button sends the raw markdown to the clipboard so it pastes cleanly into any editor.
-
-Press **Escape** to leave AI mode and return to the app grid without closing the launcher.
-
-### Providers
-
-| Provider | Config value | Needs API key |
-|----------|-------------|---------------|
-| OpenAI | `openai` | Yes |
-| Anthropic | `anthropic` | Yes |
-| Google Gemini | `gemini` | Yes |
-| Ollama (local) | `ollama` | No |
-
-### Configuring models
-
-Define one `[[ai_model]]` block per provider. The `model` field accepts a comma-separated list — each model becomes a selectable entry in the picker shown at the bottom-left of the AI panel, labelled `provider:model`. The first model in the first block is the default.
-
-```ini
-# ~/.config/trebuchet/trebuchet.conf
-
-[[ai_model]]
-provider = anthropic
-api_key  = sk-ant-api03-...
-model    = claude-sonnet-4-6, claude-opus-4-6
-
-[[ai_model]]
-provider = openai
-api_key  = sk-proj-...
-model    = gpt-4o, gpt-4-turbo
-
-[[ai_model]]
-provider = ollama
-model    = llama3.2, mistral
-```
-
-Each block supports these keys:
-
-| Key | Required | Description |
-|-----|----------|-------------|
-| `provider` | Yes | `openai`, `anthropic`, `gemini`, or `ollama` |
-| `api_key` | For cloud providers | Your API key |
-| `model` | No | Comma-separated model IDs; falls back to the provider default if omitted |
-| `base_url` | No | Override the API endpoint (useful for Ollama or compatible proxies) |
-
-#### Single-model shorthand (legacy)
-
-The older flat-key syntax still works and is equivalent to a single `[[ai_model]]` block:
-
-```ini
-ai_provider = anthropic
-ai_api_key  = sk-ant-...
-ai_model    = claude-sonnet-4-6
-```
 
 ## Window mover
 
