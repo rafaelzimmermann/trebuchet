@@ -7,7 +7,6 @@ use iced::{
 };
 use iced_layershell::to_layer_message;
 
-use crate::components::ai_agent::{self, AIAgent};
 use crate::components::app_launcher::{self, AppLauncher};
 use crate::components::cmd::{self, Cmd};
 use crate::components::command::{ComponentEvent, SlashCommand};
@@ -21,7 +20,6 @@ use crate::launcher::{scan_applications, AppEntry};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActiveComponent {
     Launcher,
-    Ai,
     Cmd,
     Settings,
     WindowMover,
@@ -34,7 +32,6 @@ pub struct Trebuchet {
     pub config: Config,
     pub active: ActiveComponent,
     pub launcher: AppLauncher,
-    pub ai_agent: AIAgent,
     pub cmd: Cmd,
     pub settings: Settings,
     pub window_mover: WindowMover,
@@ -51,7 +48,6 @@ pub enum Message {
     AppsLoaded(Vec<AppEntry>),
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
-    Ai(ai_agent::Msg),
     Cmd(cmd::Msg),
     Settings(settings::Msg),
     WindowMover(window_mover::Msg),
@@ -65,7 +61,6 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         config: Config::load(),
         active: ActiveComponent::Launcher,
         launcher: AppLauncher::new(&[]),
-        ai_agent: AIAgent::new(),
         cmd: Cmd::new(),
         settings: Settings::new(),
         window_mover: WindowMover::new(),
@@ -105,10 +100,6 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
             persist_theme(&name);
         }
 
-        ComponentEvent::CommandInvoked(SlashCommand::Ai, args) => {
-            state.active = ActiveComponent::Ai;
-            state.ai_agent.reset(args);
-        }
         ComponentEvent::CommandInvoked(SlashCommand::App, _) => {
             state.active = ActiveComponent::Launcher;
             state.launcher.reset(&state.apps);
@@ -126,8 +117,6 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
             let task = state.window_mover.reset(args);
             return task.map(Message::WindowMover);
         }
-        // No component currently produces CommandInvoked(Unknown) — unknown
-        // slash commands are handled locally (shake) in each component.
         ComponentEvent::CommandInvoked(SlashCommand::Unknown(_), _) => {}
     }
     Task::none()
@@ -150,11 +139,6 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
             let evt_task = apply_event(state, evt);
             return Task::batch([task.map(Message::Launcher), evt_task]);
         }
-        Message::Ai(m) => {
-            let (task, evt) = state.ai_agent.update(m, &state.apps, &state.config);
-            let evt_task = apply_event(state, evt);
-            return Task::batch([task.map(Message::Ai), evt_task]);
-        }
         Message::Cmd(m) => {
             let (task, evt) = state.cmd.update(m, &state.apps, &state.config);
             let evt_task = apply_event(state, evt);
@@ -176,10 +160,6 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
                 ActiveComponent::Launcher => {
                     let (t, e) = state.launcher.handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Launcher), e)
-                }
-                ActiveComponent::Ai => {
-                    let (t, e) = state.ai_agent.handle_event(&event, status, &state.apps, &state.config);
-                    (t.map(Message::Ai), e)
                 }
                 ActiveComponent::Cmd => {
                     let (t, e) = state.cmd.handle_event(&event, status, &state.apps, &state.config);
@@ -210,9 +190,6 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     let content = match state.active {
         ActiveComponent::Launcher => {
             state.launcher.view(&state.apps, &state.config).map(Message::Launcher)
-        }
-        ActiveComponent::Ai => {
-            state.ai_agent.view(&state.apps, &state.config).map(Message::Ai)
         }
         ActiveComponent::Cmd => {
             state.cmd.view(&state.apps, &state.config).map(Message::Cmd)
@@ -296,7 +273,6 @@ pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
     let events = event::listen_with(on_event);
     let component = match state.active {
         ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
-        ActiveComponent::Ai => state.ai_agent.subscription().map(Message::Ai),
         ActiveComponent::Cmd => state.cmd.subscription().map(Message::Cmd),
         ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
         ActiveComponent::WindowMover => state.window_mover.subscription().map(Message::WindowMover),

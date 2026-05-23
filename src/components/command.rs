@@ -1,6 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum SlashCommand {
-    Ai,
     App,
     Config,
     Cmd,
@@ -19,7 +18,6 @@ impl SlashCommand {
         let args = rest[end + 1..].to_string();
         Some((
             match &rest[..end] {
-                "ai"     => SlashCommand::Ai,
                 "app"    => SlashCommand::App,
                 "config" => SlashCommand::Config,
                 "cmd"    => SlashCommand::Cmd,
@@ -35,7 +33,6 @@ impl SlashCommand {
     /// Enter-triggered dispatch (call with `format!("{} ", query.trim())`).
     pub fn as_nav_event(query: &str) -> Option<ComponentEvent> {
         match Self::detect(query) {
-            Some((Self::Ai, args))     => Some(ComponentEvent::CommandInvoked(Self::Ai, args)),
             Some((Self::App, args))    => Some(ComponentEvent::CommandInvoked(Self::App, args)),
             Some((Self::Config, args)) => Some(ComponentEvent::CommandInvoked(Self::Config, args)),
             Some((Self::Cmd, args))    => Some(ComponentEvent::CommandInvoked(Self::Cmd, args)),
@@ -58,11 +55,6 @@ mod tests {
     use super::*;
 
     // ── SlashCommand::detect ──────────────────────────────────────────────────
-
-    #[test]
-    fn detect_ai_with_trailing_space() {
-        assert_eq!(SlashCommand::detect("/ai "), Some((SlashCommand::Ai, String::new())));
-    }
 
     #[test]
     fn detect_cmd_variant() {
@@ -111,7 +103,6 @@ mod tests {
     #[test]
     fn as_nav_event_known_commands_return_some() {
         for (input, expected) in [
-            ("/ai ", SlashCommand::Ai),
             ("/app ", SlashCommand::App),
             ("/config ", SlashCommand::Config),
             ("/cmd ", SlashCommand::Cmd),

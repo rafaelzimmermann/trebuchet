@@ -89,8 +89,7 @@ impl AppLauncher {
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
             if matches!(
                 cmd,
-                SlashCommand::Ai
-                    | SlashCommand::App
+                SlashCommand::App
                     | SlashCommand::Config
                     | SlashCommand::Cmd
                     | SlashCommand::Mv
@@ -173,8 +172,7 @@ impl Component for AppLauncher {
                 if let Some((cmd, args)) = SlashCommand::detect(&format!("{} ", trimmed)) {
                     if matches!(
                         cmd,
-                        SlashCommand::Ai
-                            | SlashCommand::App
+                        SlashCommand::App
                             | SlashCommand::Config
                             | SlashCommand::Cmd
                             | SlashCommand::Mv
@@ -242,8 +240,7 @@ impl Component for AppLauncher {
                 if let Some((cmd, args)) = SlashCommand::detect(&s) {
                     if matches!(
                         cmd,
-                        SlashCommand::Ai
-                            | SlashCommand::App
+                        SlashCommand::App
                             | SlashCommand::Config
                             | SlashCommand::Cmd
                             | SlashCommand::Mv
