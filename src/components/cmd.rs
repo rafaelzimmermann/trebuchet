@@ -17,8 +17,8 @@ use crate::ui::panel::{icon_btn, PanelState, COPY_ICON};
 use crate::ui::{search_bar, SearchIcon, ShakeState, PANEL_PADDING};
 
 pub struct Cmd {
-    query: String,
-    filtered: Vec<usize>,
+    pub(crate) query: String,
+    pub(crate) filtered: Vec<usize>,
     page: usize,
     selected: Option<usize>,
     panel: PanelState,

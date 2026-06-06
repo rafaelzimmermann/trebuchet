@@ -9,6 +9,7 @@ pub struct CustomCommand {
     pub display_result: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     pub columns: usize,
     pub rows: usize,

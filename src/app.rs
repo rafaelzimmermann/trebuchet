@@ -46,6 +46,10 @@ pub enum Message {
     /// Absorbs clicks anywhere inside the window so they don't propagate as Ignored.
     Absorb,
     AppsLoaded(Vec<AppEntry>),
+    /// Delivered when the async `Config::load` started in `boot` completes.
+    /// The initial frame is rendered with `Config::default()` so the window
+    /// can appear immediately; this swaps in the user's real config.
+    ConfigLoaded(Config),
     IcedEvent(Event, Status),
     Launcher(app_launcher::Msg),
     Cmd(cmd::Msg),
@@ -56,19 +60,38 @@ pub enum Message {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
+    // Start with the default config so the window can appear immediately.
+    // The real `Config::load()` runs in parallel with `scan_applications`
+    // and replaces this placeholder via `Message::ConfigLoaded` as soon as it
+    // completes. This matters at cold boot where reading trebuchet.conf +
+    // current-theme + themes/<name>.conf from cold disk can take 30–100 ms.
     let state = Trebuchet {
         apps: Vec::new(),
-        config: Config::load(),
+        config: Config::default(),
         active: ActiveComponent::Launcher,
         launcher: AppLauncher::new(&[]),
         cmd: Cmd::new(),
         settings: Settings::new(),
         window_mover: WindowMover::new(),
     };
-    let task = Task::perform(
-        async { tokio::task::spawn_blocking(scan_applications).await.unwrap_or_default() },
-        Message::AppsLoaded,
-    );
+    let task = Task::batch([
+        Task::perform(
+            async {
+                tokio::task::spawn_blocking(scan_applications)
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::AppsLoaded,
+        ),
+        Task::perform(
+            async {
+                tokio::task::spawn_blocking(Config::load)
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::ConfigLoaded,
+        ),
+    ]);
     (state, task)
 }
 
@@ -132,6 +155,16 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         Message::AppsLoaded(apps) => {
             state.launcher.reset(&apps);
             state.apps = apps;
+        }
+
+        Message::ConfigLoaded(config) => {
+            state.config = config;
+            // Cmd builds its filter from config.commands. If the user
+            // navigated to /cmd before this message arrived, the filter was
+            // built from the empty default — rebuild it now.
+            if matches!(state.active, ActiveComponent::Cmd) {
+                state.cmd.reset(&state.config);
+            }
         }
 
         Message::Launcher(m) => {
@@ -232,6 +265,7 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
     use iced::mouse;
 
     #[test]
@@ -264,6 +298,79 @@ mod tests {
             iced::window::Id::unique(),
         );
         assert!(result.is_none());
+    }
+
+    // ── ConfigLoaded ──────────────────────────────────────────────────────────
+
+    fn test_state() -> Trebuchet {
+        Trebuchet {
+            apps: Vec::new(),
+            config: Config::default(),
+            active: ActiveComponent::Launcher,
+            launcher: AppLauncher::new(&[]),
+            cmd: Cmd::new(),
+            settings: Settings::new(),
+            window_mover: WindowMover::new(),
+        }
+    }
+
+    #[test]
+    fn config_loaded_updates_state_config() {
+        let mut state = test_state();
+        let custom = Config {
+            columns: 11,
+            rows: 7,
+            icon_size: 48,
+            commands: Vec::new(),
+            theme: Theme::default(),
+        };
+        let _ = update(&mut state, Message::ConfigLoaded(custom));
+        assert_eq!(state.config.columns, 11);
+        assert_eq!(state.config.rows, 7);
+        assert_eq!(state.config.icon_size, 48);
+    }
+
+    #[test]
+    fn config_loaded_resets_cmd_when_cmd_is_active() {
+        // Regression: if the user opens /cmd before ConfigLoaded arrives, the
+        // command list would stay empty forever. ConfigLoaded must rebuild it.
+        use crate::config::CustomCommand;
+        let mut state = test_state();
+        state.active = ActiveComponent::Cmd;
+        state.cmd = Cmd::new(); // empty filter (no commands in default config)
+
+        let custom = Config {
+            columns: 7,
+            rows: 5,
+            icon_size: 96,
+            commands: vec![CustomCommand {
+                prefix: "hi".to_string(),
+                command: "echo hi".to_string(),
+                display_result: false,
+            }],
+            theme: Theme::default(),
+        };
+        let _ = update(&mut state, Message::ConfigLoaded(custom));
+
+        assert_eq!(state.config.commands.len(), 1);
+        assert_eq!(state.cmd.filtered.len(), 1, "Cmd filter should be rebuilt");
+    }
+
+    #[test]
+    fn config_loaded_does_not_touch_cmd_when_other_component_active() {
+        // No spurious reset when the user is in the launcher.
+        let mut state = test_state();
+        state.active = ActiveComponent::Launcher;
+
+        let mut cmd = Cmd::new();
+        cmd.query = "partial".to_string(); // pretend user is typing in another panel
+        state.cmd = cmd;
+
+        let _ = update(
+            &mut state,
+            Message::ConfigLoaded(Config::default()),
+        );
+        assert_eq!(state.cmd.query, "partial", "Cmd state must be untouched");
     }
 }
 
