@@ -318,7 +318,7 @@ impl Component for Settings {
 
         container(
             column![
-                search_bar(&self.query, &self.shake, SearchIcon::Terminal, &config.theme, Msg::QueryChanged),
+                search_bar(&self.query, &self.shake, SearchIcon::Terminal, "", &config.theme, Msg::QueryChanged),
                 panel,
                 action_bar,
             ]

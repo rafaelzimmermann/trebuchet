@@ -314,6 +314,7 @@ impl Component for AppLauncher {
                     &self.query,
                     &self.shake,
                     SearchIcon::Search,
+                    "Search apps...",
                     &config.theme,
                     Msg::QueryChanged
                 ),

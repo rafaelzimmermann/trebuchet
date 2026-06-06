@@ -432,6 +432,7 @@ impl Component for WindowMover {
                     &self.query,
                     &self.shake,
                     SearchIcon::Window,
+                    "Search windows...",
                     &config.theme,
                     Msg::QueryChanged,
                 ),

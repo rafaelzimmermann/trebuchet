@@ -110,7 +110,7 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
         }
         ComponentEvent::CommandInvoked(SlashCommand::Cmd, _) => {
             state.active = ActiveComponent::Cmd;
-            state.cmd.reset();
+            state.cmd.reset(&state.config);
         }
         ComponentEvent::CommandInvoked(SlashCommand::Mv, args) => {
             state.active = ActiveComponent::WindowMover;

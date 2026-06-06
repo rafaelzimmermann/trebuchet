@@ -177,10 +177,10 @@ The `command` is executed with `sh -c`, so pipes, substitutions, and any shell b
 
 ### Using the command runner
 
-Type `/cmd` (then Space or Enter) to open the command runner panel. The idle view lists all configured prefixes. Type a prefix and press Enter to run it:
+Type `/cmd` (then Space or Enter) to open the command runner panel. The configured commands are laid out as a selectable grid — arrow keys move the highlight, Enter (or a click) runs the highlighted command. The search bar filters the grid by prefix (fuzzy match), just like the app launcher.
 
 - Commands with `display_result = false` (default) run silently and close the launcher.
-- Commands with `display_result = true` run asynchronously — a "Running…" indicator appears immediately; the output is shown in the panel when the command completes. The Copy button copies the prompt + output to the clipboard.
+- Commands with `display_result = true` run asynchronously — a "Running…" indicator appears immediately; the output is shown in the panel when the command completes. The Copy button copies the prompt + output to the clipboard. Typing into the search bar dismisses the result panel and returns to the grid.
 
 ## Configuration
 

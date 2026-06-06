@@ -63,6 +63,7 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
     query: &str,
     shake: &ShakeState,
     icon: SearchIcon,
+    placeholder: &str,
     theme: &Theme,
     on_input: impl Fn(String) -> Msg + 'a,
 ) -> Element<'a, Msg> {
@@ -75,12 +76,6 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
         .width(20)
         .height(20)
         .into();
-
-    let placeholder = match icon {
-        SearchIcon::Search   => "Search apps...",
-        SearchIcon::Terminal => "",
-        SearchIcon::Window   => "Search windows...",
-    };
     let (text_color, placeholder_color, selection_color) =
         (theme.search_text, theme.search_placeholder, theme.search_selection);
     let input = text_input(placeholder, query)

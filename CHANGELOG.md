@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Command runner (`/cmd`)**: commands are now selected from a grid instead of typed
+  - The search bar filters configured commands by prefix (fuzzy match), matching the app launcher's behaviour
+  - Arrow keys, PageUp/PageDown, and the grid dots navigate the highlight; Enter or a click runs the selected command
+  - Typing into the search bar while a result is shown dismisses the panel and returns to the grid
+- `search_bar` now takes a `placeholder` parameter ("Search apps...", "Search windows...", "Search commands…", etc.)
+
 ## [0.5.0] - 2026-05-23
 
 ### Added
