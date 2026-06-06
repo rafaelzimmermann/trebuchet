@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -120,6 +121,87 @@ pub(crate) fn try_embedded_by_name(name: &str) -> Option<IconHandle> {
     None
 }
 
+// ── System icon directory index ──────────────────────────────────────────────
+// Replaces the old per-call `path.exists()` waterfall (up to 10 dirs × 2 exts
+// × N aliases per app ≈ thousands of stat() syscalls per scan) with a single
+// read_dir per directory, cached for the process lifetime. Trebuchet is
+// short-lived so a process-local cache is sufficient.
+
+/// Scan each icon directory once and return an ordered index of
+/// `(dir, { file_stem → full_path })`. Missing directories are skipped.
+///
+/// When both `<stem>.svg` and `<stem>.png` exist in the same directory, the
+/// SVG entry wins — matching the previous `for ext in ["svg", "png"]` order.
+/// Subdirectories are skipped (they are not icon files).
+fn build_dir_index(dirs: &[PathBuf]) -> Vec<(PathBuf, HashMap<String, PathBuf>)> {
+    let mut index = Vec::with_capacity(dirs.len());
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let mut map: HashMap<String, PathBuf> = HashMap::new();
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() { continue; }
+
+            let path = entry.path();
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let new_is_svg = path.extension().and_then(|e| e.to_str()) == Some("svg");
+            let existing_is_svg =
+                map.get(stem).and_then(|p| p.extension()).and_then(|e| e.to_str())
+                    == Some("svg");
+
+            // Insert when no entry yet, or when the new file is svg and the
+            // existing one isn't (svg > png > anything else).
+            if !map.contains_key(stem) || (new_is_svg && !existing_is_svg) {
+                map.insert(stem.to_string(), path);
+            }
+        }
+        index.push((dir.clone(), map));
+    }
+    index
+}
+
+/// Cached index of system icon directories, built once on first access.
+fn icon_dirs_index() -> &'static [(PathBuf, HashMap<String, PathBuf>)] {
+    static CACHE: OnceLock<Vec<(PathBuf, HashMap<String, PathBuf>)>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let dirs: Vec<PathBuf> = [
+            format!("{home}/.local/share/icons/hicolor/scalable/apps"),
+            format!("{home}/.local/share/icons/hicolor/96x96/apps"),
+            format!("{home}/.local/share/icons/hicolor/64x64/apps"),
+            format!("{home}/.local/share/icons/hicolor/48x48/apps"),
+            format!("{home}/.local/share/icons"),
+            "/usr/share/icons/hicolor/scalable/apps".to_string(),
+            "/usr/share/icons/hicolor/96x96/apps".to_string(),
+            "/usr/share/icons/hicolor/64x64/apps".to_string(),
+            "/usr/share/icons/hicolor/48x48/apps".to_string(),
+            "/usr/share/pixmaps".to_string(),
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        build_dir_index(&dirs)
+    })
+}
+
+/// Look up `names` across an ordered index, returning the first matching path.
+/// Iterates dirs in order, then names within each dir — same priority as the
+/// previous `for dir ... for name ... for ext` waterfall, but with O(1) hash
+/// lookups instead of O(N) stat() syscalls.
+fn lookup_in_index(
+    names: &[&str],
+    index: &[(PathBuf, HashMap<String, PathBuf>)],
+) -> Option<PathBuf> {
+    for (_, files) in index {
+        for name in names {
+            if let Some(path) = files.get(*name) {
+                return Some(path.clone());
+            }
+        }
+    }
+    None
+}
+
 /// Look up an icon by exact icon name.
 /// Search order: embedded assets → manifest icon_name aliases (embedded) →
 ///               absolute path → system icon theme dirs (all known aliases).
@@ -169,32 +251,8 @@ pub(crate) fn resolve_icon(icon_name: &str) -> Option<IconHandle> {
         }
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
-    let system_dirs = [
-        format!("{home}/.local/share/icons/hicolor/scalable/apps"),
-        format!("{home}/.local/share/icons/hicolor/96x96/apps"),
-        format!("{home}/.local/share/icons/hicolor/64x64/apps"),
-        format!("{home}/.local/share/icons/hicolor/48x48/apps"),
-        format!("{home}/.local/share/icons"),
-        "/usr/share/icons/hicolor/scalable/apps".to_string(),
-        "/usr/share/icons/hicolor/96x96/apps".to_string(),
-        "/usr/share/icons/hicolor/64x64/apps".to_string(),
-        "/usr/share/icons/hicolor/48x48/apps".to_string(),
-        "/usr/share/pixmaps".to_string(),
-    ];
-
-    for dir in &system_dirs {
-        for name in &search_names {
-            for ext in ["svg", "png"] {
-                let candidate = PathBuf::from(dir).join(format!("{name}.{ext}"));
-                if candidate.exists() {
-                    return Some(path_handle(&candidate));
-                }
-            }
-        }
-    }
-
-    None
+    let path = lookup_in_index(&search_names, icon_dirs_index());
+    path.map(|p| path_handle(&p))
 }
 
 fn path_handle(path: &PathBuf) -> IconHandle {
@@ -253,7 +311,11 @@ pub(crate) fn icon_for_window(class: &str, initial_title: &str) -> Option<IconHa
 
 #[cfg(test)]
 mod tests {
-    use super::name_candidates;
+    use super::{build_dir_index, lookup_in_index, name_candidates};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn simple_name_lowercased() {
@@ -289,5 +351,174 @@ mod tests {
     #[test]
     fn single_word_no_web() {
         assert_eq!(name_candidates("Spotify"), vec!["spotify"]);
+    }
+
+    // ── build_dir_index ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn build_dir_index_reads_file_stems() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("firefox.svg"), b"<svg/>").unwrap();
+        fs::write(dir.path().join("code.png"), b"PNG").unwrap();
+
+        let index = build_dir_index(&[dir.path().to_path_buf()]);
+        assert_eq!(index.len(), 1);
+        let (_, map) = &index[0];
+        assert!(map.contains_key("firefox"), "firefox stem should be indexed");
+        assert!(map.contains_key("code"), "code stem should be indexed");
+    }
+
+    #[test]
+    fn build_dir_index_skips_missing_dirs() {
+        let index =
+            build_dir_index(&[PathBuf::from("/nonexistent/trebuchet/test/abc")]);
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn build_dir_index_preserves_directory_order() {
+        let d1 = tempdir().unwrap();
+        let d2 = tempdir().unwrap();
+        fs::write(d1.path().join("a.svg"), b"").unwrap();
+        fs::write(d2.path().join("b.svg"), b"").unwrap();
+
+        let index =
+            build_dir_index(&[d1.path().to_path_buf(), d2.path().to_path_buf()]);
+        assert_eq!(index.len(), 2);
+        assert_eq!(index[0].0, d1.path());
+        assert_eq!(index[1].0, d2.path());
+    }
+
+    #[test]
+    fn build_dir_index_prefers_svg_over_png_regardless_of_order() {
+        // Build two dirs: one with png first, one with svg first.
+        // Hash iteration order is non-deterministic so we test both shapes.
+        let dir_png_first = tempdir().unwrap();
+        fs::write(dir_png_first.path().join("app.png"), b"PNG").unwrap();
+        fs::write(dir_png_first.path().join("app.svg"), b"<svg/>").unwrap();
+
+        let dir_svg_first = tempdir().unwrap();
+        fs::write(dir_svg_first.path().join("app.svg"), b"<svg/>").unwrap();
+        fs::write(dir_svg_first.path().join("app.png"), b"PNG").unwrap();
+
+        for dir in [dir_png_first, dir_svg_first] {
+            let index = build_dir_index(&[dir.path().to_path_buf()]);
+            let (_, map) = &index[0];
+            let path =
+                map.get("app").expect("app should be indexed regardless of order");
+            assert_eq!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("svg"),
+                "svg should win regardless of insertion order"
+            );
+        }
+    }
+
+    #[test]
+    fn build_dir_index_keeps_png_when_only_png_exists() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("app.png"), b"PNG").unwrap();
+
+        let index = build_dir_index(&[dir.path().to_path_buf()]);
+        let (_, map) = &index[0];
+        let path = map.get("app").unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    }
+
+    #[test]
+    fn build_dir_index_skips_subdirectories() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("hicolor")).unwrap();
+        fs::write(dir.path().join("app.svg"), b"<svg/>").unwrap();
+
+        let index = build_dir_index(&[dir.path().to_path_buf()]);
+        let (_, map) = &index[0];
+        assert!(map.contains_key("app"));
+        assert!(!map.contains_key("hicolor"), "subdirs should be skipped");
+    }
+
+    #[test]
+    fn build_dir_index_handles_reverse_dns_stems() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("com.visualstudio.code.svg"), b"").unwrap();
+
+        let index = build_dir_index(&[dir.path().to_path_buf()]);
+        let (_, map) = &index[0];
+        assert!(map.contains_key("com.visualstudio.code"));
+    }
+
+    // ── lookup_in_index ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn lookup_in_index_returns_first_match() {
+        let mut map1 = HashMap::new();
+        map1.insert("app".to_string(), PathBuf::from("/d1/app.svg"));
+        let mut map2 = HashMap::new();
+        map2.insert("app".to_string(), PathBuf::from("/d2/app.svg"));
+
+        let index = vec![(PathBuf::from("/d1"), map1), (PathBuf::from("/d2"), map2)];
+
+        assert_eq!(
+            lookup_in_index(&["app"], &index),
+            Some(PathBuf::from("/d1/app.svg")),
+        );
+    }
+
+    #[test]
+    fn lookup_in_index_returns_none_for_empty_index() {
+        let index: Vec<(PathBuf, HashMap<String, PathBuf>)> = vec![];
+        assert_eq!(lookup_in_index(&["app"], &index), None);
+    }
+
+    #[test]
+    fn lookup_in_index_returns_none_for_unknown_name() {
+        let map: HashMap<String, PathBuf> = HashMap::new();
+        let index = vec![(PathBuf::from("/d"), map)];
+        assert_eq!(lookup_in_index(&["nonexistent"], &index), None);
+    }
+
+    #[test]
+    fn lookup_in_index_falls_through_to_next_dir() {
+        let mut map1 = HashMap::new();
+        map1.insert("other".to_string(), PathBuf::from("/d1/other.svg"));
+        let mut map2 = HashMap::new();
+        map2.insert("app".to_string(), PathBuf::from("/d2/app.svg"));
+
+        let index = vec![(PathBuf::from("/d1"), map1), (PathBuf::from("/d2"), map2)];
+
+        assert_eq!(
+            lookup_in_index(&["app"], &index),
+            Some(PathBuf::from("/d2/app.svg")),
+        );
+    }
+
+    #[test]
+    fn lookup_in_index_dir_priority_over_name_priority() {
+        // Matches the original loop order: dir1.name2 wins over dir2.name1
+        // because we exhaust dir1 before moving on.
+        let mut map1 = HashMap::new();
+        map1.insert("second".to_string(), PathBuf::from("/d1/second.svg"));
+        let mut map2 = HashMap::new();
+        map2.insert("first".to_string(), PathBuf::from("/d2/first.svg"));
+
+        let index = vec![(PathBuf::from("/d1"), map1), (PathBuf::from("/d2"), map2)];
+
+        assert_eq!(
+            lookup_in_index(&["first", "second"], &index),
+            Some(PathBuf::from("/d1/second.svg")),
+            "d1’s second wins over d2’s first — dir is the outer loop"
+        );
+    }
+
+    #[test]
+    fn lookup_in_index_tries_aliases_in_order() {
+        let mut map = HashMap::new();
+        map.insert("alias".to_string(), PathBuf::from("/d/alias.svg"));
+        let index = vec![(PathBuf::from("/d"), map)];
+
+        assert_eq!(
+            lookup_in_index(&["primary", "alias"], &index),
+            Some(PathBuf::from("/d/alias.svg")),
+        );
     }
 }
