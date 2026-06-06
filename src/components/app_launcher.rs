@@ -363,6 +363,7 @@ mod tests {
                 name: n.to_string(),
                 exec: n.to_string(),
                 terminal: false,
+                icon_name: None,
                 icon: None,
             })
             .collect()

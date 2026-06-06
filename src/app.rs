@@ -46,6 +46,10 @@ pub enum Message {
     /// Absorbs clicks anywhere inside the window so they don't propagate as Ignored.
     Absorb,
     AppsLoaded(Vec<AppEntry>),
+    /// Delivered when the lazy icon-resolution task finishes. The grid has
+    /// been visible with fallback icons since `AppsLoaded`; this swaps in the
+    /// real `IconHandle`s without rearranging the apps.
+    IconsLoaded(Vec<Option<crate::icons::IconHandle>>),
     /// Delivered when the async `Config::load` started in `boot` completes.
     /// The initial frame is rendered with `Config::default()` so the window
     /// can appear immediately; this swaps in the user's real config.
@@ -155,6 +159,30 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         Message::AppsLoaded(apps) => {
             state.launcher.reset(&apps);
             state.apps = apps;
+            // Dispatch lazy icon resolution. The launcher is already fully
+            // usable (names + execs are known); icons stream in once the task
+            // completes via Message::IconsLoaded.
+            let apps_snapshot = state.apps.clone();
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        crate::launcher::resolve_all_icons(&apps_snapshot)
+                    })
+                    .await
+                    .unwrap_or_default()
+                },
+                Message::IconsLoaded,
+            );
+        }
+
+        Message::IconsLoaded(icons) => {
+            // Apply each resolved icon to its app in-place. Length may differ
+            // if a re-scan raced (unlikely in practice); only update what we can.
+            for (idx, icon) in icons.into_iter().enumerate() {
+                if let Some(app) = state.apps.get_mut(idx) {
+                    app.icon = icon;
+                }
+            }
         }
 
         Message::ConfigLoaded(config) => {
@@ -371,6 +399,53 @@ mod tests {
             Message::ConfigLoaded(Config::default()),
         );
         assert_eq!(state.cmd.query, "partial", "Cmd state must be untouched");
+    }
+
+    // ── IconsLoaded ───────────────────────────────────────────────────────────
+
+    fn app_entry(name: &str) -> crate::launcher::AppEntry {
+        crate::launcher::AppEntry {
+            name: name.to_string(),
+            exec: format!("{name} %U"),
+            terminal: false,
+            icon_name: Some(name.to_string()),
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn icons_loaded_assigns_icons_in_order() {
+        use crate::icons::IconHandle;
+        let mut state = test_state();
+        state.apps = vec![app_entry("a"), app_entry("b"), app_entry("c")];
+
+        // Pretend only the middle app resolved.
+        let svg = iced::widget::svg::Handle::from_memory(vec![]);
+        let icons = vec![None, Some(IconHandle::Vector(svg)), None];
+        let _ = update(&mut state, Message::IconsLoaded(icons));
+
+        assert!(state.apps[0].icon.is_none());
+        assert!(state.apps[1].icon.is_some(), "middle app should have icon");
+        assert!(state.apps[2].icon.is_none());
+    }
+
+    #[test]
+    fn icons_loaded_ignores_extra_entries_safely() {
+        // If the IconsLoaded vec is longer than state.apps (shouldn’t happen
+        // but cheap to defend against), the handler must not panic.
+        let mut state = test_state();
+        state.apps = vec![app_entry("a")];
+        let icons = vec![None, None, None];
+        let _ = update(&mut state, Message::IconsLoaded(icons));
+        assert_eq!(state.apps.len(), 1);
+    }
+
+    #[test]
+    fn icons_loaded_with_empty_vec_is_noop() {
+        let mut state = test_state();
+        state.apps = vec![app_entry("a"), app_entry("b")];
+        let _ = update(&mut state, Message::IconsLoaded(vec![]));
+        assert!(state.apps.iter().all(|a| a.icon.is_none()));
     }
 }
 
