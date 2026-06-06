@@ -163,25 +163,40 @@ fn build_dir_index(dirs: &[PathBuf]) -> Vec<(PathBuf, HashMap<String, PathBuf>)>
 /// Cached index of system icon directories, built once on first access.
 fn icon_dirs_index() -> &'static [(PathBuf, HashMap<String, PathBuf>)] {
     static CACHE: OnceLock<Vec<(PathBuf, HashMap<String, PathBuf>)>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let dirs: Vec<PathBuf> = [
-            format!("{home}/.local/share/icons/hicolor/scalable/apps"),
-            format!("{home}/.local/share/icons/hicolor/96x96/apps"),
-            format!("{home}/.local/share/icons/hicolor/64x64/apps"),
-            format!("{home}/.local/share/icons/hicolor/48x48/apps"),
-            format!("{home}/.local/share/icons"),
-            "/usr/share/icons/hicolor/scalable/apps".to_string(),
-            "/usr/share/icons/hicolor/96x96/apps".to_string(),
-            "/usr/share/icons/hicolor/64x64/apps".to_string(),
-            "/usr/share/icons/hicolor/48x48/apps".to_string(),
-            "/usr/share/pixmaps".to_string(),
-        ]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
-        build_dir_index(&dirs)
-    })
+    CACHE.get_or_init(|| build_dir_index(&icon_search_dirs()))
+}
+
+/// Ordered list of icon directories probed by [`resolve_icon`].
+///
+/// User-side (`~/.local/share/icons/hicolor/…`) takes priority over system
+/// (`/usr/share/…`) so per-user overrides win. Sizes probed:
+///
+/// - **scalable** — SVG, renders cleanly at any configured `icon_size`.
+/// - **96×96** — exact match for the default `icon_size = 96`.
+/// - **48×48** — common fallback for apps that don’t ship a 96×96 raster.
+///
+/// Dropped intentionally:
+/// - `~/.local/share/icons` (the parent of `hicolor/`) — never contains
+///   flat icon files; only subdirectories.
+/// - `64x64` raster — intermediate between 48 and 96; rare in practice and
+///   usually duplicated by an entry in another size.
+fn icon_search_dirs() -> Vec<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        // user-side hicolor (priority: scalable → 96 → 48)
+        format!("{home}/.local/share/icons/hicolor/scalable/apps"),
+        format!("{home}/.local/share/icons/hicolor/96x96/apps"),
+        format!("{home}/.local/share/icons/hicolor/48x48/apps"),
+        // system hicolor (same size order)
+        "/usr/share/icons/hicolor/scalable/apps".to_string(),
+        "/usr/share/icons/hicolor/96x96/apps".to_string(),
+        "/usr/share/icons/hicolor/48x48/apps".to_string(),
+        // legacy fallback
+        "/usr/share/pixmaps".to_string(),
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
 }
 
 /// Look up `names` across an ordered index, returning the first matching path.
@@ -519,6 +534,72 @@ mod tests {
         assert_eq!(
             lookup_in_index(&["primary", "alias"], &index),
             Some(PathBuf::from("/d/alias.svg")),
+        );
+    }
+
+    // ── icon_search_dirs ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn icon_search_dirs_excludes_parent_of_hicolor() {
+        // ~/.local/share/icons only contains subdirs (hicolor, …), never flat
+        // icon files. Searching it would always miss.
+        let dirs = super::icon_search_dirs();
+        assert!(
+            !dirs
+                .iter()
+                .any(|p| p.to_string_lossy().ends_with("/.local/share/icons")),
+            "parent of hicolor should not be in the probe list: {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn icon_search_dirs_excludes_intermediate_64_raster() {
+        // 64x64 is between 48 and 96 and rarely the only size an icon ships
+        // at; we keep 48 (common fallback) and 96 (default icon_size) only.
+        let dirs = super::icon_search_dirs();
+        assert!(
+            !dirs.iter().any(|p| p.to_string_lossy().contains("64x64")),
+            "64x64 dirs should not be in the probe list: {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn icon_search_dirs_includes_scalable_and_96_and_48() {
+        let dirs = super::icon_search_dirs();
+        for needle in ["scalable", "96x96", "48x48"] {
+            assert!(
+                dirs.iter().any(|p| p.to_string_lossy().contains(needle)),
+                "expected {needle:?} in probe list: {dirs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_search_dirs_includes_pixmaps() {
+        let dirs = super::icon_search_dirs();
+        assert!(
+            dirs.iter().any(|p| p.to_string_lossy() == "/usr/share/pixmaps"),
+            "pixmaps should remain: {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn icon_search_dirs_user_before_system() {
+        // User-side overrides must be probed before system-side ones so that
+        // ~/.local wins over /usr/share when both have the same stem.
+        let dirs = super::icon_search_dirs();
+        let home = std::env::var("HOME").unwrap_or_default();
+        let first_user = dirs
+            .iter()
+            .position(|p| p.starts_with(&home))
+            .expect("at least one user-side dir should be present");
+        let first_system = dirs
+            .iter()
+            .position(|p| p.to_string_lossy().starts_with("/usr/"))
+            .expect("at least one system-side dir should be present");
+        assert!(
+            first_user < first_system,
+            "user dirs must come before system dirs: {dirs:?}"
         );
     }
 }
