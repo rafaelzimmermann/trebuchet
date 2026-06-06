@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use iced::widget::{image, svg};
 use rust_embed::RustEmbed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Icons (and manifest.json) bundled into the binary at compile time from `assets/icons/`.
 #[derive(RustEmbed)]
@@ -122,48 +122,148 @@ pub(crate) fn try_embedded_by_name(name: &str) -> Option<IconHandle> {
 }
 
 // ── System icon directory index ──────────────────────────────────────────────
-// Replaces the old per-call `path.exists()` waterfall (up to 10 dirs × 2 exts
-// × N aliases per app ≈ thousands of stat() syscalls per scan) with a single
-// read_dir per directory, cached for the process lifetime. Trebuchet is
-// short-lived so a process-local cache is sufficient.
+// Three layers of caching, each cutting cold-boot I/O further:
+//
+//   1. Process-local OnceLock: build the index once per trebuchet run.
+//   2. Per-dir file index: one read_dir per directory, never one stat per
+//      (dir × ext × alias) combo.
+//   3. Disk cache (~/.cache/trebuchet/icon-dirs.json): survives process
+//      restarts so warm launches skip the read_dirs entirely when the
+//      dir mtimes haven’t changed.
 
-/// Scan each icon directory once and return an ordered index of
-/// `(dir, { file_stem → full_path })`. Missing directories are skipped.
-///
-/// When both `<stem>.svg` and `<stem>.png` exist in the same directory, the
-/// SVG entry wins — matching the previous `for ext in ["svg", "png"]` order.
-/// Subdirectories are skipped (they are not icon files).
-fn build_dir_index(dirs: &[PathBuf]) -> Vec<(PathBuf, HashMap<String, PathBuf>)> {
+/// Bump when the on-disk schema changes; old caches are discarded.
+const ICON_CACHE_VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct IconDirCache {
+    version: u32,
+    dirs: HashMap<PathBuf, IconDirEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct IconDirEntry {
+    mtime_secs: u64,
+    files: HashMap<String, PathBuf>,
+}
+
+/// On-disk location of the icon directory cache.
+fn icon_cache_path() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".cache/trebuchet/icon-dirs.json"))
+}
+
+/// Read the cache file from a specific path. Returns `None` on any I/O or
+/// parse error, or if the version is wrong — caller falls back to scanning.
+fn load_icon_cache_from(path: &std::path::Path) -> Option<IconDirCache> {
+    let data = std::fs::read(path).ok()?;
+    let cache: IconDirCache = serde_json::from_slice(&data).ok()?;
+    if cache.version != ICON_CACHE_VERSION {
+        return None;
+    }
+    Some(cache)
+}
+
+fn load_icon_cache() -> Option<IconDirCache> {
+    load_icon_cache_from(&icon_cache_path()?)
+}
+
+/// Write the cache to a specific path. Creates parent directories as needed.
+fn save_icon_cache_to(path: &std::path::Path, cache: &IconDirCache) -> Option<()> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let data = serde_json::to_vec(cache).ok()?;
+    std::fs::write(path, data).ok()?;
+    Some(())
+}
+
+fn save_icon_cache(cache: &IconDirCache) -> Option<()> {
+    save_icon_cache_to(&icon_cache_path()?, cache)
+}
+
+/// Directory mtime in seconds since UNIX_EPOCH. `None` if the dir is missing
+/// or the platform can’t report mtime — caller skips such dirs from the index.
+fn dir_mtime_secs(path: &std::path::Path) -> Option<u64> {
+    let m = std::fs::metadata(path).ok()?;
+    let modified = m.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_secs())
+}
+
+/// Read a single directory into a `{file_stem → full_path}` map.
+/// SVG beats PNG when both exist; subdirectories are skipped.
+fn scan_one_dir(dir: &std::path::Path) -> HashMap<String, PathBuf> {
+    let mut map: HashMap<String, PathBuf> = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return map };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_dir() { continue; }
+
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let new_is_svg = path.extension().and_then(|e| e.to_str()) == Some("svg");
+        let existing_is_svg =
+            map.get(stem).and_then(|p| p.extension()).and_then(|e| e.to_str()) == Some("svg");
+
+        if !map.contains_key(stem) || (new_is_svg && !existing_is_svg) {
+            map.insert(stem.to_string(), path);
+        }
+    }
+    map
+}
+
+/// Build the dir index, reusing cached entries whenever a directory’s mtime
+/// hasn’t changed. Mutates `cache` to add/update entries for every dir that
+/// was scanned (so the caller can persist it once at the end).
+fn build_dir_index_with_cache(
+    dirs: &[PathBuf],
+    cache: &mut IconDirCache,
+) -> Vec<(PathBuf, HashMap<String, PathBuf>)> {
     let mut index = Vec::with_capacity(dirs.len());
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        let mut map: HashMap<String, PathBuf> = HashMap::new();
-        for entry in entries.flatten() {
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_dir() { continue; }
+        let Some(current_mtime) = dir_mtime_secs(dir) else { continue };
 
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let new_is_svg = path.extension().and_then(|e| e.to_str()) == Some("svg");
-            let existing_is_svg =
-                map.get(stem).and_then(|p| p.extension()).and_then(|e| e.to_str())
-                    == Some("svg");
-
-            // Insert when no entry yet, or when the new file is svg and the
-            // existing one isn't (svg > png > anything else).
-            if !map.contains_key(stem) || (new_is_svg && !existing_is_svg) {
-                map.insert(stem.to_string(), path);
+        // Cache hit — same mtime → reuse cached file map without touching disk.
+        if let Some(cached) = cache.dirs.get(dir) {
+            if cached.mtime_secs == current_mtime {
+                index.push((dir.clone(), cached.files.clone()));
+                continue;
             }
         }
-        index.push((dir.clone(), map));
+
+        // Cache miss — scan and record.
+        let files = scan_one_dir(dir);
+        cache.dirs.insert(
+            dir.clone(),
+            IconDirEntry { mtime_secs: current_mtime, files: files.clone() },
+        );
+        index.push((dir.clone(), files));
     }
     index
 }
 
+/// Wrapper around [`build_dir_index_with_cache`] used by tests. Uses a
+/// throwaway in-memory cache so test runs don’t pollute the user’s cache.
+#[cfg(test)]
+fn build_dir_index(dirs: &[PathBuf]) -> Vec<(PathBuf, HashMap<String, PathBuf>)> {
+    let mut cache = IconDirCache::default();
+    build_dir_index_with_cache(dirs, &mut cache)
+}
+
 /// Cached index of system icon directories, built once on first access.
+/// Backed by `~/.cache/trebuchet/icon-dirs.json` so warm launches skip the
+/// per-directory read_dirs entirely when no icons have been installed.
 fn icon_dirs_index() -> &'static [(PathBuf, HashMap<String, PathBuf>)] {
     static CACHE: OnceLock<Vec<(PathBuf, HashMap<String, PathBuf>)>> = OnceLock::new();
-    CACHE.get_or_init(|| build_dir_index(&icon_search_dirs()))
+    CACHE.get_or_init(|| {
+        let dirs = icon_search_dirs();
+        let mut cache = load_icon_cache().unwrap_or_default();
+        let index = build_dir_index_with_cache(&dirs, &mut cache);
+        // Best-effort persist; if it fails (read-only fs, no HOME, etc.)
+        // the in-memory index is still valid for this process.
+        let _ = save_icon_cache(&cache);
+        index
+    })
 }
 
 /// Ordered list of icon directories probed by [`resolve_icon`].
@@ -326,7 +426,8 @@ pub(crate) fn icon_for_window(class: &str, initial_title: &str) -> Option<IconHa
 
 #[cfg(test)]
 mod tests {
-    use super::{build_dir_index, lookup_in_index, name_candidates};
+    use super::*;
+    use filetime::FileTime;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -601,5 +702,161 @@ mod tests {
             first_user < first_system,
             "user dirs must come before system dirs: {dirs:?}"
         );
+    }
+
+    // ── Disk cache (build_dir_index_with_cache, save/load) ──────────────────────
+
+    #[test]
+    fn dir_mtime_secs_returns_some_for_existing_dir() {
+        let dir = tempdir().unwrap();
+        assert!(dir_mtime_secs(dir.path()).is_some());
+    }
+
+    #[test]
+    fn dir_mtime_secs_returns_none_for_missing_dir() {
+        assert!(dir_mtime_secs(std::path::Path::new("/nonexistent/trebuchet/xyz")).is_none());
+    }
+
+    #[test]
+    fn build_dir_index_with_cache_hits_when_mtime_unchanged() {
+        // Pre-populate the cache with an entry whose mtime matches the dir.
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("app.svg"), b"").unwrap();
+        let mtime = dir_mtime_secs(dir.path()).unwrap();
+        let mut files = HashMap::new();
+        files.insert("app".to_string(), dir.path().join("app.svg"));
+        let mut dirs_map = HashMap::new();
+        dirs_map.insert(
+            dir.path().to_path_buf(),
+            IconDirEntry { mtime_secs: mtime, files },
+        );
+        let mut cache = IconDirCache {
+            version: ICON_CACHE_VERSION,
+            dirs: dirs_map,
+        };
+
+        // Delete the file to prove the cache is being used (not the disk).
+        fs::remove_file(dir.path().join("app.svg")).unwrap();
+
+        let index = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
+        assert_eq!(index.len(), 1);
+        let (_, map) = &index[0];
+        assert!(
+            map.contains_key("app"),
+            "cached entry should be returned even though file is gone"
+        );
+    }
+
+    #[test]
+    fn build_dir_index_with_cache_rescans_when_mtime_changes() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("old.svg"), b"").unwrap();
+        let mtime_at_first_scan = dir_mtime_secs(dir.path()).unwrap();
+
+        // First scan to populate the cache.
+        let mut cache = IconDirCache::default();
+        let _ = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
+        assert_eq!(cache.dirs.len(), 1);
+        assert_eq!(
+            cache.dirs[dir.path()].files.keys().collect::<Vec<_>>(),
+            vec![&"old".to_string()]
+        );
+
+        // Force the dir mtime backwards so the cached entry is stale.
+        filetime::set_file_mtime(
+            dir.path(),
+            FileTime::from_unix_time(mtime_at_first_scan as i64 - 60, 0),
+        )
+        .unwrap();
+
+        // Add a new file (would be invisible if we trusted the cache).
+        fs::write(dir.path().join("new.svg"), b"").unwrap();
+        // Bump mtime forward so the new state is detected.
+        filetime::set_file_mtime(
+            dir.path(),
+            FileTime::from_unix_time(mtime_at_first_scan as i64 + 60, 0),
+        )
+        .unwrap();
+
+        let index = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
+        let (_, map) = &index[0];
+        assert!(map.contains_key("new"), "new file should be visible after rescan");
+        assert!(map.contains_key("old"));
+    }
+
+    #[test]
+    fn build_dir_index_with_cache_adds_new_dirs_to_cache() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("app.svg"), b"").unwrap();
+
+        let mut cache = IconDirCache::default();
+        assert!(cache.dirs.is_empty());
+        let _ = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
+        assert_eq!(cache.dirs.len(), 1, "dir should be added to cache after scan");
+        assert!(cache.dirs[dir.path()].files.contains_key("app"));
+    }
+
+    #[test]
+    fn build_dir_index_with_cache_skips_missing_dirs() {
+        let mut cache = IconDirCache::default();
+        let index = build_dir_index_with_cache(
+            &[PathBuf::from("/nonexistent/trebuchet/abc")],
+            &mut cache,
+        );
+        assert!(index.is_empty());
+        assert!(cache.dirs.is_empty(), "missing dir should not pollute cache");
+    }
+
+    #[test]
+    fn save_and_load_icon_cache_round_trip() {
+        let tmp = tempdir().unwrap();
+        let cache_path = tmp.path().join("cache.json");
+
+        let mut files = HashMap::new();
+        files.insert("firefox".to_string(), PathBuf::from("/x/firefox.svg"));
+        let mut dirs_map = HashMap::new();
+        dirs_map.insert(
+            PathBuf::from("/usr/share/icons/hicolor/scalable/apps"),
+            IconDirEntry { mtime_secs: 1_700_000_000, files },
+        );
+        let cache = IconDirCache { version: ICON_CACHE_VERSION, dirs: dirs_map };
+
+        assert!(save_icon_cache_to(&cache_path, &cache).is_some());
+        let loaded = load_icon_cache_from(&cache_path).expect("should load");
+        assert_eq!(loaded.version, ICON_CACHE_VERSION);
+        assert_eq!(loaded.dirs.len(), 1);
+        assert!(loaded
+            .dirs
+            .get(PathBuf::from("/usr/share/icons/hicolor/scalable/apps").as_path())
+            .is_some());
+    }
+
+    #[test]
+    fn load_icon_cache_returns_none_for_missing_file() {
+        let result = load_icon_cache_from(std::path::Path::new("/nonexistent/cache.json"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_icon_cache_returns_none_for_wrong_version() {
+        let tmp = tempdir().unwrap();
+        let cache_path = tmp.path().join("cache.json");
+        let stale = IconDirCache {
+            version: ICON_CACHE_VERSION + 1, // future version
+            dirs: HashMap::new(),
+        };
+        save_icon_cache_to(&cache_path, &stale).unwrap();
+        assert!(
+            load_icon_cache_from(&cache_path).is_none(),
+            "cache with wrong version should be discarded"
+        );
+    }
+
+    #[test]
+    fn load_icon_cache_returns_none_for_corrupt_json() {
+        let tmp = tempdir().unwrap();
+        let cache_path = tmp.path().join("cache.json");
+        fs::write(&cache_path, b"not json {{{").unwrap();
+        assert!(load_icon_cache_from(&cache_path).is_none());
     }
 }
