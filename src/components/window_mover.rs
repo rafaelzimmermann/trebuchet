@@ -87,7 +87,7 @@ pub enum Msg {
     LoadFailed,
     WindowActivated(usize),
     WindowHovered(Option<usize>),
-    WindowMoved,
+    WindowMoved(Result<(), String>),
     GoToPage(usize),
     ShakeTick,
 }
@@ -122,7 +122,10 @@ impl WindowMover {
         self.active_workspace_id = 0;
         Task::perform(fetch_windows(), |result| match result {
             Ok((data, active_id)) => Msg::WindowsLoaded(data, active_id),
-            Err(_) => Msg::LoadFailed,
+            Err(error) => {
+                eprintln!("Could not load windows: {error}");
+                Msg::LoadFailed
+            }
         })
     }
 
@@ -216,7 +219,7 @@ impl WindowMover {
         let active_ws = self.active_workspace_id;
         let task = Task::perform(
             async move { move_window(active_ws, address).await },
-            |_| Msg::WindowMoved,
+            Msg::WindowMoved,
         );
         (task, ComponentEvent::Handled)
     }
@@ -345,8 +348,13 @@ impl Component for WindowMover {
                 self.hovered = idx;
             }
 
-            Msg::WindowMoved => {
+            Msg::WindowMoved(Ok(())) => {
                 return (Task::none(), ComponentEvent::Exit);
+            }
+
+            Msg::WindowMoved(Err(error)) => {
+                eprintln!("Could not move window: {error}");
+                self.shake = ShakeState::trigger();
             }
 
             Msg::GoToPage(p) => {
@@ -554,24 +562,12 @@ fn window_grid<'a>(
 // ── Async hyprctl helpers ─────────────────────────────────────────────────────
 
 async fn fetch_windows() -> Result<(Vec<WindowData>, i64), String> {
-    let active_out = tokio::process::Command::new("hyprctl")
-        .args(["activeworkspace", "-j"])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-
+    let active_out = hyprctl(&["activeworkspace", "-j"]).await?;
     let active: HyprActiveWorkspace =
-        serde_json::from_slice(&active_out.stdout).map_err(|e| e.to_string())?;
+        serde_json::from_str(&active_out).map_err(|e| e.to_string())?;
     let active_id = active.id;
-
-    let clients_out = tokio::process::Command::new("hyprctl")
-        .args(["clients", "-j"])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let clients: Vec<HyprClient> =
-        serde_json::from_slice(&clients_out.stdout).map_err(|e| e.to_string())?;
+    let clients_out = hyprctl(&["clients", "-j"]).await?;
+    let clients: Vec<HyprClient> = serde_json::from_str(&clients_out).map_err(|e| e.to_string())?;
 
     let mut clients: Vec<HyprClient> = clients
         .into_iter()
@@ -593,16 +589,207 @@ async fn fetch_windows() -> Result<(Vec<WindowData>, i64), String> {
     Ok((windows, active_id))
 }
 
-async fn move_window(active_workspace_id: i64, address: String) {
+/// Bound IPC latency and check process status; dispatch replies need a separate check.
+async fn hyprctl(args: &[&str]) -> Result<String, String> {
+    let output = tokio::process::Command::new("hyprctl")
+        .args(args)
+        .kill_on_drop(true)
+        .output();
+    let output = tokio::time::timeout(Duration::from_secs(5), output)
+        .await
+        .map_err(|_| "hyprctl timed out".to_string())?
+        .map_err(|e| format!("Could not run hyprctl: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "hyprctl failed ({}): {} {}",
+            output.status,
+            stdout,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(stdout)
+}
+
+fn dispatch_result(reply: &str) -> Result<(), String> {
+    if reply.trim() == "ok" {
+        Ok(())
+    } else {
+        Err(format!("Hyprland rejected the move: {reply}"))
+    }
+}
+
+fn lua_move(active_workspace_id: i64, address: &str) -> Result<String, String> {
+    // Addresses come from IPC, but must still be safe inside a Lua expression.
+    let hex = address.strip_prefix("0x").unwrap_or_default();
+    if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid Hyprland window address".into());
+    }
+    Ok(format!(
+        "hl.dsp.window.move({{ workspace = {active_workspace_id}, follow = false, window = \"address:{address}\" }})"
+    ))
+}
+
+async fn move_window(active_workspace_id: i64, address: String) -> Result<(), String> {
+    move_window_using(active_workspace_id, address, |args| async move {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        hyprctl(&args).await
+    })
+    .await
+}
+
+async fn move_window_using<F, Fut>(
+    active_workspace_id: i64,
+    address: String,
+    mut run: F,
+) -> Result<(), String>
+where
+    F: FnMut(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
+    let lua = lua_move(active_workspace_id, &address)?;
     let target = format!("{},address:{}", active_workspace_id, address);
-    let _ = tokio::process::Command::new("hyprctl")
-        .args(["dispatch", "movetoworkspacesilent", &target])
-        .output()
-        .await;
+    let reply = run(vec![
+        "dispatch".into(),
+        "movetoworkspacesilent".into(),
+        target,
+    ])
+    .await;
+    // hyprctl exits nonzero for Lua parser errors, so inspect both success and
+    // error replies. Retry only this explicit rejection, never transport errors.
+    let diagnostic = match &reply {
+        Ok(reply) | Err(reply) => reply,
+    };
+    if diagnostic.contains("dispatch in lua is a shorthand for hl.dispatch(...)") {
+        let reply = run(vec!["dispatch".into(), lua]).await?;
+        dispatch_result(&reply)
+    } else {
+        dispatch_result(&reply?)
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn pages(total: usize, page_size: usize) -> usize {
-    if page_size == 0 { 1 } else { total.div_ceil(page_size) }
+    if page_size == 0 {
+        1
+    } else {
+        total.div_ceil(page_size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn retries_lua_parser_rejection_even_when_hyprctl_exits_nonzero() {
+        let diagnostic = "error: [string \"return hl.dispatch(movetoworkspacesilent 3,ad...\"]:1: ')' expected near '3'\n\n → Note: dispatch in lua is a shorthand for hl.dispatch(...), your syntax might need to be updated.";
+        // Real hyprctl 0.56.2 exits 7; also tolerate versions returning exit 0.
+        for rejection in [
+            Err(format!("hyprctl failed (exit status: 7): {diagnostic}")),
+            Ok(diagnostic.to_string()),
+        ] {
+            let mut calls = Vec::new();
+            let result = move_window_using(3, "0xabc123".into(), |args| {
+                calls.push(args);
+                std::future::ready(if calls.len() == 1 {
+                    rejection.clone()
+                } else {
+                    Ok("ok".into())
+                })
+            })
+            .await;
+            assert!(result.is_ok());
+            assert_eq!(
+                calls,
+                vec![
+                    vec![
+                        "dispatch".to_string(),
+                        "movetoworkspacesilent".into(),
+                        "3,address:0xabc123".into()
+                    ],
+                    vec!["dispatch".into(), lua_move(3, "0xabc123").unwrap()],
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_success_and_ambiguous_failures_are_never_retried() {
+        for reply in [
+            Ok("ok".to_string()),
+            Ok("Window not found".into()),
+            Err("timeout".into()),
+        ] {
+            let mut calls = 0;
+            let result = move_window_using(3, "0xabc123".into(), |_| {
+                calls += 1;
+                std::future::ready(reply.clone())
+            })
+            .await;
+            assert_eq!(calls, 1);
+            assert_eq!(result.is_ok(), reply == Ok("ok".into()));
+        }
+    }
+
+    #[test]
+    fn dispatch_requires_explicit_success() {
+        assert!(dispatch_result("ok\n").is_ok());
+        for reply in ["", "Invalid dispatcher", "Window not found", "ok\nerror"] {
+            assert!(dispatch_result(reply).is_err());
+        }
+    }
+
+    #[test]
+    fn lua_move_targets_the_requested_window_without_following() {
+        assert_eq!(
+            lua_move(3, "0xabc123").unwrap(),
+            "hl.dsp.window.move({ workspace = 3, follow = false, window = \"address:0xabc123\" })"
+        );
+    }
+
+    #[test]
+    fn lua_move_rejects_invalid_or_injected_addresses() {
+        for address in ["", "0x", "abc", "0xghi", "0x1\" }); os.exit() --"] {
+            assert!(lua_move(3, address).is_err());
+        }
+    }
+
+    #[test]
+    fn failed_move_keeps_launcher_open() {
+        let mut mover = WindowMover::new();
+        mover.query = "firefox".into();
+        let (_, event) = mover.update(
+            Msg::WindowMoved(Err("Window not found".into())),
+            &[],
+            &Config::default(),
+        );
+        assert!(matches!(event, ComponentEvent::Handled));
+        assert!(mover.shake.active);
+        assert_eq!(mover.query, "firefox");
+    }
+
+    #[test]
+    fn successful_move_closes_launcher() {
+        let mut mover = WindowMover::new();
+        let (_, event) = mover.update(Msg::WindowMoved(Ok(())), &[], &Config::default());
+        assert!(matches!(event, ComponentEvent::Exit));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Hyprland Lua session; targets a nonexistent window"]
+    async fn live_lua_dispatch_retry() {
+        // Null cannot identify a live client. Exercise the real CLI exit status
+        // and fallback without changing any windows in the user's session.
+        move_window(1, "0x0".into()).await.expect("Lua retry must succeed");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Hyprland session; reads windows without moving them"]
+    async fn live_hyprland_window_query() {
+        fetch_windows()
+            .await
+            .expect("Hyprland IPC must be readable");
+    }
 }

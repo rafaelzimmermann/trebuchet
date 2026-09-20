@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Window mover supports Hyprland 0.55+ Lua dispatch syntax while retaining legacy configuration support.
+- Failed window moves no longer close the launcher as if they succeeded; errors are logged to stderr.
+- Hyprctl queries check exit status and time out after five seconds.
+
+### Documentation
+- Added the Lua keybinding example for Hyprland 0.55+.
+
 ### Changed
 - **Command runner (`/cmd`)**: commands are now selected from a grid instead of typed
   - The search bar filters configured commands by prefix (fuzzy match), matching the app launcher's behaviour

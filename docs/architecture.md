@@ -208,7 +208,8 @@ The window mover is Hyprland-specific:
 - **Discovery:** `hyprctl clients -j` returns all open windows as JSON; `hyprctl activeworkspace -j` identifies the current workspace.
 - **Filtering:** Windows on the active workspace are excluded.
 - **Sorting:** Windows are ordered by workspace ID, then by horizontal position.
-- **Moving:** `hyprctl dispatch movetoworkspacesilent "<workspace>,address:<addr>"` silently pulls the window.
+- **Moving:** `hyprctl dispatch movetoworkspacesilent "<workspace>,address:<addr>"` silently pulls the window on legacy configurations. An explicit Lua-syntax rejection triggers `hyprctl dispatch 'hl.dsp.window.move({ workspace = <id>, follow = false, window = "address:<addr>" })'` instead. Transport and other dispatcher failures are not retried. Only an `ok` reply closes the launcher; failures trigger the existing shake feedback and log details to stderr.
+- **IPC failures:** requests check process status and have a five-second timeout with child-process cleanup.
 - **Exit:** After a successful move, the launcher exits (`ComponentEvent::Exit`).
 
 ---

@@ -58,7 +58,14 @@ bash trebuchet/scripts/install.sh --uninstall
 
 ### Bind to a key
 
-Add this to your Hyprland config (`~/.config/hypr/hyprland.conf`):
+For Hyprland 0.55+ using Lua configuration, add this to
+`~/.config/hypr/hyprland.lua`:
+
+```lua
+hl.bind("SUPER + Space", hl.dsp.exec_cmd("trebuchet"))
+```
+
+For legacy Hyprland configuration (`~/.config/hypr/hyprland.conf`):
 
 ```
 bind = SUPER, Space, exec, trebuchet
@@ -119,6 +126,11 @@ Type `/mv` (then Space or Enter) to switch to the window mover. It shows all ope
 ```
 
 Each cell shows the app icon and a `workspace:title` label. As you hover or navigate with the keyboard the full label is shown at the bottom of the panel.
+
+The window mover requires `hyprctl` from your running Hyprland installation.
+It supports both legacy and Lua dispatch syntax (introduced in Hyprland 0.55).
+Failed moves keep the launcher open and log the compositor error to stderr;
+run `trebuchet` from a terminal to inspect it.
 
 Selecting a window with Enter or a click moves it silently to your current workspace and closes the launcher. **Escape** returns to the app grid without moving anything.
 
