@@ -13,6 +13,9 @@ All notable changes to this project will be documented in this file.
 - Added the Lua keybinding example for Hyprland 0.55+.
 
 ### Changed
+- Updated `iced_layershell` and its backend from 0.15.0 to 0.19.1, the latest version published on crates.io at upgrade time; iced remains at 0.14.0.
+- Refreshed compatible dependencies, including Tokio 1.53.1, Wayland client 0.31.15, Rayon 1.12.0, and rust-embed 8.12.0.
+- Constrained `winit-core` to beta.2 to avoid an upstream compilation failure with beta.3 in `iced_exdevtools` 0.19.1.
 - **Command runner (`/cmd`)**: commands are now selected from a grid instead of typed
   - The search bar filters configured commands by prefix (fuzzy match), matching the app launcher's behaviour
   - Arrow keys, PageUp/PageDown, and the grid dots navigate the highlight; Enter or a click runs the selected command

@@ -242,7 +242,7 @@ cargo test
 | Dependency | Version | Purpose |
 |-----------|---------|---------|
 | `iced` | 0.14 | UI framework (Elm-inspired, declarative) |
-| `iced_layershell` | 0.15 | Wayland layer-shell backend for iced |
+| `iced_layershell` | 0.19.1 | Wayland layer-shell backend for iced |
 | `freedesktop-desktop-entry` | 0.8 | Parse `.desktop` files |
 | `xdg` | 3.0 | XDG base-directory resolution |
 | `fuzzy-matcher` | 0.3 | Skim-based fuzzy search |
@@ -328,3 +328,10 @@ Config file: `~/.config/trebuchet/trebuchet.conf`
 | 0.3.1 | 2026-03-07 | Click-handling fixes (margin vs content), shared PANEL_PADDING |
 | 0.4.0 | 2026-03-08 | Window mover, icon manifest, shared icons module |
 | 0.4.1 | 2026-03-22 | Performance: spawn_blocking + Rayon for app scanning |
+
+### Dependency compatibility
+
+`winit-core` is constrained to `=0.31.0-beta.2` because `iced_exdevtools` 0.19.1
+fails to compile against beta.3's non-exhaustive `NativeKeyCode` enum. This also
+keeps `winit-common` on beta.2. Remove the constraint when the layer-shell stack
+supports the newer API. Build with `--locked` to use the checked-in dependency set.
