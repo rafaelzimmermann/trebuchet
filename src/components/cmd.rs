@@ -24,6 +24,7 @@ pub struct Cmd {
     panel: PanelState,
     copy_feedback: bool,
     shake: ShakeState,
+    request_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ pub enum Msg {
     Copied,
     ShakeTick,
     /// Delivered when an async `display_result` command finishes.
-    CommandOutput(Result<String, String>),
+    CommandOutput(u64, Result<String, String>),
 }
 
 impl Cmd {
@@ -48,10 +49,17 @@ impl Cmd {
             panel: PanelState::Idle,
             copy_feedback: false,
             shake: ShakeState::default(),
+            request_id: 0,
         }
     }
 
+    pub fn leave(&mut self) {
+        self.request_id = self.request_id.wrapping_add(1);
+        self.panel = PanelState::Idle;
+    }
+
     pub fn reset(&mut self, config: &Config) {
+        self.leave();
         self.query = String::new();
         self.panel = PanelState::Idle;
         self.copy_feedback = false;
@@ -70,9 +78,7 @@ impl Cmd {
             let mut scored: Vec<(usize, i64)> = commands
                 .iter()
                 .enumerate()
-                .filter_map(|(i, c)| {
-                    matcher.fuzzy_match(&c.prefix, query).map(|s| (i, s))
-                })
+                .filter_map(|(i, c)| matcher.fuzzy_match(&c.prefix, query).map(|s| (i, s)))
                 .collect();
             scored.sort_by(|a, b| b.1.cmp(&a.1));
             self.filtered = scored.into_iter().map(|(i, _)| i).collect();
@@ -91,8 +97,7 @@ impl Cmd {
             return;
         }
         let current = self.selected.unwrap_or(self.page * page_size);
-        let next = (current as isize + delta)
-            .clamp(0, self.filtered.len() as isize - 1) as usize;
+        let next = (current as isize + delta).clamp(0, self.filtered.len() as isize - 1) as usize;
         self.selected = Some(next);
         self.page = next / page_size;
     }
@@ -113,6 +118,9 @@ impl Cmd {
     /// Run the command at `commands[idx]`. Returns Exit for silent commands,
     /// otherwise transitions to `Running` and returns Handled.
     fn execute_idx(&mut self, idx: usize, config: &Config) -> (Task<Msg>, ComponentEvent) {
+        if matches!(self.panel, PanelState::Running { .. }) {
+            return (Task::none(), ComponentEvent::Handled);
+        }
         let Some(cmd) = config.commands.get(idx) else {
             self.shake = ShakeState::trigger();
             return (Task::none(), ComponentEvent::Handled);
@@ -120,6 +128,8 @@ impl Cmd {
         let shell_cmd = cmd.command.clone();
         let prompt = cmd.prefix.clone();
         if cmd.display_result {
+            self.request_id = self.request_id.wrapping_add(1);
+            let request_id = self.request_id;
             self.panel = PanelState::Running { prompt };
             self.query.clear();
             self.selected = None;
@@ -129,24 +139,34 @@ impl Cmd {
             self.apply_filter(&config.commands, "");
             let task = Task::perform(
                 async move {
-                    match tokio::process::Command::new("sh")
-                        .args(["-c", &shell_cmd])
-                        .output()
+                    crate::process::run_command(&shell_cmd)
                         .await
-                    {
-                        Ok(o) => {
-                            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            if out.is_empty() { Ok("(no output)".to_string()) } else { Ok(out) }
-                        }
-                        Err(e) => Err(format!("Error: {e}")),
-                    }
+                        .map(|output| output.display())
                 },
-                Msg::CommandOutput,
+                move |result| Msg::CommandOutput(request_id, result),
             );
             (task, ComponentEvent::Handled)
         } else {
-            let _ = std::process::Command::new("sh").args(["-c", &shell_cmd]).spawn();
-            (Task::none(), ComponentEvent::Exit)
+            match std::process::Command::new("sh")
+                .args(["-c", &shell_cmd])
+                .spawn()
+            {
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    (Task::none(), ComponentEvent::Exit)
+                }
+                Err(error) => {
+                    let output = format!("Could not start command: {error}");
+                    self.panel = PanelState::Result {
+                        copy_text: format!("$ {prompt}\n{output}"),
+                        prompt,
+                        output,
+                    };
+                    (Task::none(), ComponentEvent::Handled)
+                }
+            }
         }
     }
 
@@ -161,10 +181,7 @@ impl Cmd {
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
             if matches!(
                 cmd,
-                SlashCommand::App
-                    | SlashCommand::Config
-                    | SlashCommand::Cmd
-                    | SlashCommand::Mv
+                SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv
             ) {
                 self.query.clear();
                 self.apply_filter(&config.commands, "");
@@ -198,7 +215,12 @@ impl Component for Cmd {
         _apps: &[AppEntry],
         config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            ..
+        }) = event
         else {
             return (Task::none(), ComponentEvent::Handled);
         };
@@ -206,9 +228,10 @@ impl Component for Cmd {
         let is_idle = matches!(self.panel, PanelState::Idle);
 
         match key {
-            Key::Named(Named::Escape) => {
-                (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, String::new()))
-            }
+            Key::Named(Named::Escape) => (
+                Task::none(),
+                ComponentEvent::CommandInvoked(SlashCommand::App, String::new()),
+            ),
 
             Key::Named(Named::Enter) => {
                 // While a `display_result` command is running, ignore Enter.
@@ -319,7 +342,9 @@ impl Component for Cmd {
                     _ => String::new(),
                 };
                 if !text_to_copy.is_empty() {
-                    let _ = std::process::Command::new("wl-copy").arg(&text_to_copy).spawn();
+                    let _ = std::process::Command::new("wl-copy")
+                        .arg(&text_to_copy)
+                        .spawn();
                     self.copy_feedback = true;
                     return (
                         Task::perform(
@@ -336,7 +361,12 @@ impl Component for Cmd {
             Msg::ShakeTick => {
                 self.shake.advance();
             }
-            Msg::CommandOutput(result) => {
+            Msg::CommandOutput(request_id, result) => {
+                if request_id != self.request_id
+                    || !matches!(self.panel, PanelState::Running { .. })
+                {
+                    return (Task::none(), ComponentEvent::Handled);
+                }
                 let prompt = if let PanelState::Running { prompt } = &self.panel {
                     prompt.clone()
                 } else {
@@ -344,7 +374,11 @@ impl Component for Cmd {
                 };
                 let output = result.unwrap_or_else(|e| e);
                 let copy_text = format!("$ {prompt}\n{output}");
-                self.panel = PanelState::Result { prompt, output, copy_text };
+                self.panel = PanelState::Result {
+                    prompt,
+                    output,
+                    copy_text,
+                };
                 return (Task::none(), ComponentEvent::Handled);
             }
         }
@@ -364,7 +398,11 @@ impl Component for Cmd {
         let end = (start + page_size).min(self.filtered.len());
         let page_slice = &self.filtered[start..end];
         let highlighted = self.selected.and_then(|s| {
-            if s >= start && s < end { Some(s - start) } else { None }
+            if s >= start && s < end {
+                Some(s - start)
+            } else {
+                None
+            }
         });
 
         let body: Element<'a, Msg> = match &self.panel {
@@ -383,14 +421,18 @@ impl Component for Cmd {
                     command_grid(&config.commands, page_slice, config, highlighted)
                 }
             }
-            PanelState::Running { prompt } => {
-                column![
-                    text(format!("$ {prompt}")).font(Font::MONOSPACE).size(14).color(prompt_color),
-                    text("Running\u{2026}").font(Font::MONOSPACE).size(14).color(idle_color),
-                ]
-                .spacing(6)
-                .into()
-            }
+            PanelState::Running { prompt } => column![
+                text(format!("$ {prompt}"))
+                    .font(Font::MONOSPACE)
+                    .size(14)
+                    .color(prompt_color),
+                text("Running\u{2026}")
+                    .font(Font::MONOSPACE)
+                    .size(14)
+                    .color(idle_color),
+            ]
+            .spacing(6)
+            .into(),
             PanelState::Result { prompt, output, .. } => {
                 let prompt_line = text(format!("$ {prompt}"))
                     .font(Font::MONOSPACE)
@@ -409,7 +451,10 @@ impl Component for Cmd {
         // matches the app launcher's look.
         let panel_bg = config.theme.terminal_background;
         let panel: Element<'a, Msg> = if matches!(self.panel, PanelState::Idle) {
-            container(body).width(Length::Fill).height(Length::Fill).into()
+            container(body)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         } else {
             container(
                 scrollable(container(body).width(Length::Fill).padding([0, 4]))
@@ -418,7 +463,10 @@ impl Component for Cmd {
             )
             .style(move |_theme| container::Style {
                 background: Some(Background::Color(panel_bg)),
-                border: Border { radius: 10.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 10.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .width(Length::Fill)
@@ -428,11 +476,13 @@ impl Component for Cmd {
         };
 
         let has_result = matches!(self.panel, PanelState::Result { .. });
-        let (btn_bg, feedback_color) =
-            (config.theme.button_background, config.theme.copy_feedback);
+        let (btn_bg, feedback_color) = (config.theme.button_background, config.theme.copy_feedback);
 
         let feedback: Element<'a, Msg> = if self.copy_feedback {
-            text("Copied to clipboard").size(13).color(feedback_color).into()
+            text("Copied to clipboard")
+                .size(13)
+                .color(feedback_color)
+                .into()
         } else {
             text("").size(13).into()
         };
@@ -554,7 +604,10 @@ fn command_grid<'a>(
                                 None
                             },
                             border: if is_selected {
-                                Border { radius: 8.0.into(), ..Default::default() }
+                                Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                }
                             } else {
                                 Border::default()
                             },
@@ -599,7 +652,10 @@ mod tests {
     use crate::ui::panel::PanelState;
 
     fn config_with(cmds: Vec<CustomCommand>) -> Config {
-        Config { commands: cmds, ..Config::default() }
+        Config {
+            commands: cmds,
+            ..Config::default()
+        }
     }
 
     fn silent_cmd(prefix: &str, command: &str) -> CustomCommand {
@@ -702,7 +758,11 @@ mod tests {
     #[test]
     fn move_selection_advances_within_filtered() {
         let mut c = Cmd::new();
-        let cfg = Config { columns: 3, rows: 2, ..Config::default() };
+        let cfg = Config {
+            columns: 3,
+            rows: 2,
+            ..Config::default()
+        };
         c.filtered = vec![10, 20, 30, 40];
         c.selected = Some(0);
         c.move_selection(1, &cfg);
@@ -712,7 +772,11 @@ mod tests {
     #[test]
     fn move_selection_clamps_at_end() {
         let mut c = Cmd::new();
-        let cfg = Config { columns: 3, rows: 2, ..Config::default() };
+        let cfg = Config {
+            columns: 3,
+            rows: 2,
+            ..Config::default()
+        };
         c.filtered = vec![10, 20];
         c.selected = Some(1);
         c.move_selection(1, &cfg);
@@ -731,7 +795,11 @@ mod tests {
     #[test]
     fn handle_page_advances_and_clamps() {
         let mut c = Cmd::new();
-        let cfg = Config { columns: 2, rows: 1, ..Config::default() };
+        let cfg = Config {
+            columns: 2,
+            rows: 1,
+            ..Config::default()
+        };
         c.filtered = vec![0, 1, 2, 3, 4]; // 3 pages
         assert_eq!(c.handle_page(1, &cfg), ComponentEvent::Handled);
         assert_eq!(c.page, 1);
@@ -787,10 +855,15 @@ mod tests {
     #[test]
     fn command_output_ok_sets_result_panel() {
         let mut c = Cmd::new();
-        c.panel = PanelState::Running { prompt: "hi".to_string() };
+        c.panel = PanelState::Running {
+            prompt: "hi".to_string(),
+        };
         let apps: Vec<AppEntry> = vec![];
-        let (_, evt) =
-            c.update(Msg::CommandOutput(Ok("hello".to_string())), &apps, &Config::default());
+        let (_, evt) = c.update(
+            Msg::CommandOutput(c.request_id, Ok("hello".to_string())),
+            &apps,
+            &Config::default(),
+        );
         assert_eq!(evt, ComponentEvent::Handled);
         assert!(matches!(&c.panel, PanelState::Result { output, .. } if output == "hello"));
     }
@@ -798,10 +871,12 @@ mod tests {
     #[test]
     fn command_output_empty_shows_no_output_placeholder() {
         let mut c = Cmd::new();
-        c.panel = PanelState::Running { prompt: "noop".to_string() };
+        c.panel = PanelState::Running {
+            prompt: "noop".to_string(),
+        };
         let apps: Vec<AppEntry> = vec![];
         let _ = c.update(
-            Msg::CommandOutput(Ok("(no output)".to_string())),
+            Msg::CommandOutput(c.request_id, Ok("(no output)".to_string())),
             &apps,
             &Config::default(),
         );
@@ -811,10 +886,12 @@ mod tests {
     #[test]
     fn command_output_err_shows_error_string() {
         let mut c = Cmd::new();
-        c.panel = PanelState::Running { prompt: "oops".to_string() };
+        c.panel = PanelState::Running {
+            prompt: "oops".to_string(),
+        };
         let apps: Vec<AppEntry> = vec![];
         let (_, evt) = c.update(
-            Msg::CommandOutput(Err("Error: no such file".to_string())),
+            Msg::CommandOutput(c.request_id, Err("Error: no such file".to_string())),
             &apps,
             &Config::default(),
         );
@@ -825,9 +902,15 @@ mod tests {
     #[test]
     fn command_output_preserves_prompt_from_running_state() {
         let mut c = Cmd::new();
-        c.panel = PanelState::Running { prompt: "mycommand".to_string() };
+        c.panel = PanelState::Running {
+            prompt: "mycommand".to_string(),
+        };
         let apps: Vec<AppEntry> = vec![];
-        let _ = c.update(Msg::CommandOutput(Ok("done".to_string())), &apps, &Config::default());
+        let _ = c.update(
+            Msg::CommandOutput(c.request_id, Ok("done".to_string())),
+            &apps,
+            &Config::default(),
+        );
         assert!(matches!(&c.panel, PanelState::Result { prompt, .. } if prompt == "mycommand"));
     }
 
@@ -858,7 +941,11 @@ mod tests {
     #[test]
     fn go_to_page_clamps_to_last() {
         let mut c = Cmd::new();
-        let cfg = Config { columns: 2, rows: 1, ..Config::default() };
+        let cfg = Config {
+            columns: 2,
+            rows: 1,
+            ..Config::default()
+        };
         c.filtered = vec![0, 1, 2, 3]; // 2 pages
         let apps: Vec<AppEntry> = vec![];
         let _ = c.update(Msg::GoToPage(99), &apps, &cfg);
@@ -884,7 +971,10 @@ mod tests {
         let cfg = config_with(vec![silent_cmd("hi", "x")]);
         let apps: Vec<AppEntry> = vec![];
         let (_, evt) = c.update(Msg::QueryChanged("/app ".to_string()), &apps, &cfg);
-        assert!(matches!(evt, ComponentEvent::CommandInvoked(SlashCommand::App, _)));
+        assert!(matches!(
+            evt,
+            ComponentEvent::CommandInvoked(SlashCommand::App, _)
+        ));
         assert!(c.query.is_empty());
         assert!(matches!(c.panel, PanelState::Idle));
     }
@@ -919,7 +1009,9 @@ mod tests {
     #[test]
     fn copy_when_running_returns_handled() {
         let mut c = Cmd::new();
-        c.panel = PanelState::Running { prompt: "uptime".to_string() };
+        c.panel = PanelState::Running {
+            prompt: "uptime".to_string(),
+        };
         let apps: Vec<AppEntry> = vec![];
         let (_, evt) = c.update(Msg::Copy, &apps, &Config::default());
         assert_eq!(evt, ComponentEvent::Handled);

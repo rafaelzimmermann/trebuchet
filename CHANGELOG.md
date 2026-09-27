@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Configuration validation**: `columns`/`rows` are clamped to 1–32 and `icon_size` to 1–512; out-of-range or unparseable values are now rejected so the previously loaded value is retained instead of corrupting the layout.
+- **Config `[[command]]` blocks**: fields are reset when a block is incomplete, so a stray `prefix`/`command` can no longer leak into a later block. Values lose at most one matching pair of surrounding double quotes, preserving embedded shell quoting such as `command = echo "hello world"`.
+- **UTF-8 safety**: slash-command argument splitting no longer panics on multibyte whitespace (e.g. em-space after `/mv`), and theme colours accept only 6- or 8-digit ASCII hexadecimal strings (`#RRGGBB` / `#RRGGBBAA`) — malformed colours return `None` instead of mis-slicing non-ASCII input.
+- **Desktop Exec parsing**: replaced whitespace splitting with a specification-aware parser (quoting rules, desktop-entry escape decoding, field-code expansion). Quoted arguments, embedded spaces and `%c`/`%k`/`%i`/`%%` codes are handled per the spec; shell metacharacters are never re-parsed. Terminal apps are launched with explicit `<emulator> <flag> program args` instead of a string pasted into `sh -c`.
+- **Launch failures are reported**: if an application (or a silent custom command) cannot be spawned, the launcher stays open, shakes and logs the error instead of silently exiting.
+- **Custom command output**: `display_result = true` commands now show stdout **and** stderr plus a non-zero exit status instead of dropping everything but stdout.
+- **Stale async results**: command output and window-mover messages carry a request ID that is invalidated on navigation/reset, so late completions can no longer populate the wrong panel; duplicate in-flight window moves are suppressed.
 - Window mover supports Hyprland 0.55+ Lua dispatch syntax while retaining legacy configuration support.
 - Failed window moves no longer close the launcher as if they succeeded; errors are logged to stderr.
 - Hyprctl queries check exit status and time out after five seconds.

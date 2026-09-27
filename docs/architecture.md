@@ -36,9 +36,11 @@ main.rs                      entry point — configures the layer-shell window a
      │   ├─ grid.rs           app_grid widget (generic over message type)
      │   └─ panel.rs          icon_btn, COPY_ICON, PanelState enum
      │
-     ├─ launcher.rs           scan_applications(), launch_app(), clean_exec()
+     ├─ launcher.rs           scan_applications(), launch_app(), find_terminal()
+     ├─ desktop_exec.rs       specification-aware Exec parsing (quoting, escapes, field codes)
+     ├─ process.rs            async shell runner preserving exit status, stdout and stderr
      ├─ icons.rs              icon resolution pipeline (embedded → manifest → system)
-     ├─ config.rs             INI config parser with layered defaults
+     ├─ config.rs             INI config parser with layered defaults and range validation
      └─ theme.rs              Theme struct with 22 colour keys loaded from .conf files
 ```
 
@@ -100,7 +102,7 @@ Configuration is loaded in three layers, each overriding the previous:
 2. **Embedded config** (`assets/trebuchet.conf` compiled into the binary via `include_str!`)
 3. **User config** (`~/.config/trebuchet/trebuchet.conf`)
 
-The parser is a simple line-by-line INI reader that also handles `[[command]]` TOML-like array-of-tables blocks.
+The parser is a simple line-by-line INI reader that also handles `[[command]]` TOML-like array-of-tables blocks. Dimensions are range-validated on parse — `columns`/`rows` accept 1–32 and `icon_size` accepts 1–512; invalid or out-of-range values are rejected so the preceding layer's value is retained. Command-block fields are reset whenever a new block starts or the file ends, so an incomplete block never leaks its fields into a later one. A value loses at most one matching pair of surrounding double quotes, so embedded shell quoting (`command = echo "hello world"`) survives intact.
 
 **Rationale:** Embedded defaults ensure the binary works out-of-the-box without any config file. The layered approach means users only need to specify the keys they want to change. The custom parser avoids adding a heavy TOML/INI dependency for a format that is trivially parseable.
 
@@ -123,8 +125,10 @@ All potentially blocking work is offloaded from the iced render loop:
 
 - **App scanning:** `scan_applications()` runs via `tokio::task::spawn_blocking` so the window appears immediately while `.desktop` files are parsed on a thread pool (parallelised with Rayon).
 - **Window fetching:** `hyprctl clients -j` and `hyprctl activeworkspace -j` run as async `tokio::process::Command`.
-- **Shell commands:** `display_result` commands in `/cmd` run via `tokio::process::Command` with a "Running…" indicator.
+- **Shell commands:** `display_result` commands in `/cmd` run via the async runner in `process.rs`, which preserves the exit status plus both output streams.
 - **Clipboard:** `wl-copy` is spawned as a subprocess (non-blocking).
+
+Every asynchronous operation that produces a completion message carries a monotonically increasing **request ID**. Navigating away from a component (or re-entering it) bumps the ID via `leave()`/`reset()`, so a late `CommandOutput` or `WindowsLoaded` message whose ID no longer matches is dropped instead of mutating stale state. The window mover additionally guards dispatches with a `moving` flag so Enter or a double-click cannot fire two concurrent `hyprctl dispatch` calls.
 
 **Rationale:** The iced runtime is single-threaded for UI updates. Any blocking I/O on the main thread would cause the UI to freeze. Tokio's multi-threaded runtime provides the necessary concurrency.
 
@@ -141,8 +145,15 @@ Themes are plain `.conf` files with `key = #RRGGBB` or `key = #RRGGBBAA` colour 
 ### Application launch
 
 ```
+scan_applications() → desktop_exec::parse() per .desktop file
+  → desktop-entry escapes decoded, Exec quoted per the spec, field codes expanded/removed
+  → AppEntry.exec: Vec<String> (argument boundaries preserved)
+
 User types → handle_event (char input) → query updated → fuzzy filter re-run
-User presses Enter → handle_submit → launch_app() → clean_exec() → std::process::Command → exit(0)
+User presses Enter → handle_submit → launch_app(&exec, terminal)
+  → terminal apps: <emulator> <flag> program args… (explicit arguments, no shell re-parse)
+  → std::process::Command::spawn + background reaper → exit(0)
+  → spawn failure → shake feedback + stderr message, launcher stays open
 ```
 
 ### Window move
@@ -168,13 +179,17 @@ User selects window → dispatch_move() → Task::perform(move_window)
 
 ```
 User types /cmd → SlashCommand detected → switch to Cmd component
-User types prefix + Enter → execute()
-  ├─ display_result = false → spawn shell, exit(0)
-  └─ display_result = true  → PanelState::Running, async tokio::process
+Enter on a highlighted grid cell → execute_idx()
+  ├─ display_result = false → spawn shell + reaper, exit(0); spawn failure → Result panel
+  └─ display_result = true  → PanelState::Running, request ID captured
                                      ↓
-                              Msg::CommandOutput(Ok/Err)
+                        process::run_command via sh -c (status + stdout + stderr kept)
                                      ↓
-                              PanelState::Result → output displayed
+                              Msg::CommandOutput(id, Ok/Err)
+                                     ↓
+                ID must match and panel still Running, otherwise dropped
+                                     ↓
+                              PanelState::Result → combined output displayed
 ```
 
 ---
@@ -220,8 +235,11 @@ Tests are co-located in each module under `#[cfg(test)] mod tests`. Key test are
 
 | Module | What is tested |
 |--------|---------------|
-| `config.rs` | Config parsing (defaults, overrides, `[[command]]` blocks, accumulation across layers) |
-| `launcher.rs` | `clean_exec()` field-code stripping |
+| `config.rs` | Config parsing (defaults, overrides, dimension range rejection, `[[command]]` block reset, quote preservation, accumulation across layers) |
+| `desktop_exec.rs` | Exec quoting/escaping/field-code expansion, rejection of malformed Exec values |
+| `process.rs` | Exit status, stdout and stderr preservation; failure reporting |
+| `launcher.rs` | Icon resolution; launch path builds explicit arguments |
+| `theme.rs` | `parse_color()` accepts only 6/8-digit ASCII hex; malformed colours never panic |
 | `icons.rs` | `name_candidates()` slug generation |
 | `app.rs` | Event routing (cursor-left closes, margin click closes, captured click does not close) |
 | `command.rs` | `SlashCommand::detect()` and `as_nav_event()` parsing |
@@ -279,6 +297,8 @@ trebuchet/
 │   ├── theme.rs                # 22-key colour theme system
 │   ├── icons.rs                # icon resolution pipeline
 │   ├── launcher.rs             # .desktop scanner, app launcher logic
+│   ├── desktop_exec.rs          # spec-aware Exec parsing and field-code expansion
+│   ├── process.rs               # async shell runner (status + stdout + stderr)
 │   ├── components/
 │   │   ├── component.rs        # Component trait
 │   │   ├── command.rs          # SlashCommand parser, ComponentEvent enum
@@ -301,11 +321,14 @@ trebuchet/
 
 Config file: `~/.config/trebuchet/trebuchet.conf`
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `columns` | `7` | Grid columns per page |
-| `rows` | `5` | Grid rows per page |
-| `icon_size` | `96` | Icon size in pixels |
+| Key | Default | Valid range | Description |
+|-----|---------|-------------|-------------|
+| `columns` | `7` | 1–32 | Grid columns per page |
+| `rows` | `5` | 1–32 | Grid rows per page |
+| `icon_size` | `96` | 1–512 | Icon size in pixels |
+
+Values outside the valid range (or unparseable values) are ignored and the
+previously loaded value is kept.
 
 ### `[[command]]` block (repeatable)
 
@@ -313,7 +336,7 @@ Config file: `~/.config/trebuchet/trebuchet.conf`
 |-----|----------|-------------|
 | `prefix` | Yes | Trigger prefix (e.g. `shutdown`) |
 | `command` | Yes | Shell command to run |
-| `display_result` | No | `true` to capture and display stdout (default: `false`) |
+| `display_result` | No | `true` to capture and display stdout and stderr plus the exit status (default: `false`) |
 
 ---
 

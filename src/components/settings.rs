@@ -49,7 +49,9 @@ fn list_themes() -> Vec<String> {
                 .filter_map(|e| {
                     let p = e.path();
                     if p.extension().and_then(|x| x.to_str()) == Some("conf") {
-                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                        p.file_stem()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_string())
                     } else {
                         None
                     }
@@ -94,7 +96,11 @@ impl Settings {
                 let list = self.format_theme_list();
                 let output = format!("Usage: theme <name>\n\nAvailable themes:\n{list}");
                 let copy_text = format!("$ {q}\n{output}");
-                self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
+                self.panel = PanelState::Result {
+                    prompt: q.to_string(),
+                    output,
+                    copy_text,
+                };
                 self.query.clear();
                 return ComponentEvent::Handled;
             }
@@ -104,7 +110,11 @@ impl Settings {
                 Some(theme) => {
                     let output = format!("Theme '{name}' applied.");
                     let copy_text = format!("$ {q}\n{output}");
-                    self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
+                    self.panel = PanelState::Result {
+                        prompt: q.to_string(),
+                        output,
+                        copy_text,
+                    };
                     self.query.clear();
                     self.copy_feedback = false;
                     return ComponentEvent::ThemeChanged(name.to_string(), Box::new(theme));
@@ -113,7 +123,11 @@ impl Settings {
                     let list = self.format_theme_list();
                     let output = format!("Theme '{name}' not found.\n\nAvailable themes:\n{list}");
                     let copy_text = format!("$ {q}\n{output}");
-                    self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
+                    self.panel = PanelState::Result {
+                        prompt: q.to_string(),
+                        output,
+                        copy_text,
+                    };
                     self.shake = ShakeState::trigger();
                     return ComponentEvent::Handled;
                 }
@@ -123,7 +137,11 @@ impl Settings {
         // ── Unknown sub-command ────────────────────────────────────────────────
         let output = format!("Unknown command: {q}\n\nAvailable commands:\n  theme <name>    switch the colour theme");
         let copy_text = format!("$ {q}\n{output}");
-        self.panel = PanelState::Result { prompt: q.to_string(), output, copy_text };
+        self.panel = PanelState::Result {
+            prompt: q.to_string(),
+            output,
+            copy_text,
+        };
         self.shake = ShakeState::trigger();
         ComponentEvent::Handled
     }
@@ -132,7 +150,11 @@ impl Settings {
         if self.themes.is_empty() {
             "  (no themes found in ~/.config/trebuchet/themes/)".into()
         } else {
-            self.themes.iter().map(|n| format!("  {n}")).collect::<Vec<_>>().join("\n")
+            self.themes
+                .iter()
+                .map(|n| format!("  {n}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         }
     }
 }
@@ -149,15 +171,21 @@ impl Component for Settings {
         _apps: &[AppEntry],
         _config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            ..
+        }) = event
         else {
             return (Task::none(), ComponentEvent::Handled);
         };
 
         match key {
-            Key::Named(Named::Escape) => {
-                (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, String::new()))
-            }
+            Key::Named(Named::Escape) => (
+                Task::none(),
+                ComponentEvent::CommandInvoked(SlashCommand::App, String::new()),
+            ),
 
             Key::Named(Named::Enter) => {
                 let q = self.query.trim().to_string();
@@ -218,7 +246,9 @@ impl Component for Settings {
                     _ => String::new(),
                 };
                 if !text_to_copy.is_empty() {
-                    let _ = std::process::Command::new("wl-copy").arg(&text_to_copy).spawn();
+                    let _ = std::process::Command::new("wl-copy")
+                        .arg(&text_to_copy)
+                        .spawn();
                     self.copy_feedback = true;
                     return (
                         Task::perform(
@@ -240,21 +270,30 @@ impl Component for Settings {
     }
 
     fn view<'a>(&'a self, _apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Msg> {
-        let (idle_color, text_color, prompt_color) =
-            (config.theme.ai_idle, config.theme.terminal_output, config.theme.terminal_prompt);
+        let (idle_color, text_color, prompt_color) = (
+            config.theme.ai_idle,
+            config.theme.terminal_output,
+            config.theme.terminal_prompt,
+        );
 
         let body: Element<'a, Msg> = match &self.panel {
             PanelState::Idle => {
                 let theme_list = self.format_theme_list();
                 let mut items: Vec<Element<'a, Msg>> = vec![
-                    text("Available commands:").size(13).color(prompt_color).into(),
+                    text("Available commands:")
+                        .size(13)
+                        .color(prompt_color)
+                        .into(),
                     text("  theme <name>    switch the colour theme")
                         .font(Font::MONOSPACE)
                         .size(14)
                         .color(idle_color)
                         .into(),
                     text("").size(6).into(),
-                    text("Available themes:").size(13).color(prompt_color).into(),
+                    text("Available themes:")
+                        .size(13)
+                        .color(prompt_color)
+                        .into(),
                 ];
                 for line in theme_list.lines() {
                     items.push(
@@ -291,7 +330,10 @@ impl Component for Settings {
         )
         .style(move |_theme| container::Style {
             background: Some(Background::Color(panel_bg)),
-            border: Border { radius: 10.0.into(), ..Default::default() },
+            border: Border {
+                radius: 10.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .width(Length::Fill)
@@ -299,11 +341,13 @@ impl Component for Settings {
         .padding([16, 20]);
 
         let has_result = matches!(self.panel, PanelState::Result { .. });
-        let (btn_bg, feedback_color) =
-            (config.theme.button_background, config.theme.copy_feedback);
+        let (btn_bg, feedback_color) = (config.theme.button_background, config.theme.copy_feedback);
 
         let feedback: Element<'a, Msg> = if self.copy_feedback {
-            text("Copied to clipboard").size(13).color(feedback_color).into()
+            text("Copied to clipboard")
+                .size(13)
+                .color(feedback_color)
+                .into()
         } else {
             text("").size(13).into()
         };
@@ -318,7 +362,14 @@ impl Component for Settings {
 
         container(
             column![
-                search_bar(&self.query, &self.shake, SearchIcon::Terminal, "", &config.theme, Msg::QueryChanged),
+                search_bar(
+                    &self.query,
+                    &self.shake,
+                    SearchIcon::Terminal,
+                    "",
+                    &config.theme,
+                    Msg::QueryChanged
+                ),
                 panel,
                 action_bar,
             ]

@@ -15,7 +15,12 @@ pub trait Component {
         config: &Config,
     ) -> (Task<Self::Msg>, ComponentEvent);
 
-    fn update(&mut self, msg: Self::Msg, apps: &[AppEntry], config: &Config) -> (Task<Self::Msg>, ComponentEvent);
+    fn update(
+        &mut self,
+        msg: Self::Msg,
+        apps: &[AppEntry],
+        config: &Config,
+    ) -> (Task<Self::Msg>, ComponentEvent);
 
     fn view<'a>(&'a self, apps: &'a [AppEntry], config: &'a Config) -> Element<'a, Self::Msg>;
 

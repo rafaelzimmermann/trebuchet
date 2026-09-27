@@ -171,7 +171,7 @@ prefix  = /reboot
 command = reboot
 ```
 
-Set `display_result = true` to capture stdout and show it in the response panel instead of closing the launcher:
+Set `display_result = true` to capture stdout and stderr and show them in the response panel (with a non-zero exit status reported) instead of closing the launcher:
 
 ```ini
 [[command]]
@@ -191,8 +191,8 @@ The `command` is executed with `sh -c`, so pipes, substitutions, and any shell b
 
 Type `/cmd` (then Space or Enter) to open the command runner panel. The configured commands are laid out as a selectable grid — arrow keys move the highlight, Enter (or a click) runs the highlighted command. The search bar filters the grid by prefix (fuzzy match), just like the app launcher.
 
-- Commands with `display_result = false` (default) run silently and close the launcher.
-- Commands with `display_result = true` run asynchronously — a "Running…" indicator appears immediately; the output is shown in the panel when the command completes. The Copy button copies the prompt + output to the clipboard. Typing into the search bar dismisses the result panel and returns to the grid.
+- Commands with `display_result = false` (default) run silently and close the launcher; if the command cannot even be started, the error is shown in the panel instead.
+- Commands with `display_result = true` run asynchronously — a "Running…" indicator appears immediately; stdout, stderr and a non-zero exit status are shown in the panel when the command completes. The Copy button copies the prompt + output to the clipboard. Typing into the search bar dismisses the result panel and returns to the grid.
 
 ## Configuration
 
@@ -207,11 +207,13 @@ rows      = 5
 icon_size = 96
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `columns` | `7` | Number of app columns in the grid |
-| `rows` | `5` | Number of app rows per page |
-| `icon_size` | `96` | Icon size in pixels |
+| Setting | Default | Valid range | Description |
+|---------|---------|-------------|-------------|
+| `columns` | `7` | 1–32 | Number of app columns in the grid |
+| `rows` | `5` | 1–32 | Number of app rows per page |
+| `icon_size` | `96` | 1–512 | Icon size in pixels |
+
+Values outside the valid range are ignored and the previously loaded value is kept.
 
 ---
 

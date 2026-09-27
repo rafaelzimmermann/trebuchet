@@ -21,18 +21,18 @@ pub struct Config {
 impl Config {
     pub fn load() -> Self {
         let mut cfg = Self::parse(Self::default(), DEFAULT_CONF);
-        if let Some(content) = config_path("trebuchet.conf")
-            .and_then(|p| std::fs::read_to_string(p).ok())
+        if let Some(content) =
+            config_path("trebuchet.conf").and_then(|p| std::fs::read_to_string(p).ok())
         {
             cfg = Self::parse(cfg, &content);
         }
         // Apply the last-selected theme (written by the 'theme <name>' settings command).
-        if let Some(name) = config_path("current-theme")
-            .and_then(|p| std::fs::read_to_string(p).ok())
+        if let Some(name) =
+            config_path("current-theme").and_then(|p| std::fs::read_to_string(p).ok())
         {
             let name = name.trim().to_string();
-            if let Some(theme) = config_path(&format!("themes/{}.conf", name))
-                .and_then(|p| Theme::from_file(&p))
+            if let Some(theme) =
+                config_path(&format!("themes/{}.conf", name)).and_then(|p| Theme::from_file(&p))
             {
                 cfg.theme = theme;
             }
@@ -47,18 +47,19 @@ impl Config {
         let mut cur_display = false;
         let mut in_cmd_block = false;
 
-        let finalize_cmd = |base: &mut Config,
-                            prefix: &mut String,
-                            command: &mut String,
-                            display: &mut bool| {
-            if !prefix.is_empty() && !command.is_empty() {
-                base.commands.push(CustomCommand {
-                    prefix: std::mem::take(prefix).trim_start_matches('/').to_string(),
-                    command: std::mem::take(command),
-                    display_result: std::mem::take(display),
-                });
-            }
-        };
+        let finalize_cmd =
+            |base: &mut Config, prefix: &mut String, command: &mut String, display: &mut bool| {
+                let prefix = std::mem::take(prefix).trim_start_matches('/').to_string();
+                let command = std::mem::take(command);
+                let display_result = std::mem::take(display);
+                if !prefix.is_empty() && !command.is_empty() {
+                    base.commands.push(CustomCommand {
+                        prefix,
+                        command,
+                        display_result,
+                    });
+                }
+            };
 
         for line in content.lines() {
             let line = line.trim();
@@ -67,39 +68,72 @@ impl Config {
             }
             if line.starts_with('[') {
                 if in_cmd_block {
-                    finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
-                    in_cmd_block = false;
+                    finalize_cmd(
+                        &mut base,
+                        &mut cur_prefix,
+                        &mut cur_command,
+                        &mut cur_display,
+                    );
                 }
-                match line {
-                    "[[command]]" => in_cmd_block = true,
-                    _ => {}
-                }
+                in_cmd_block = line == "[[command]]";
                 continue;
             }
 
-            let Some((key, val)) = line.split_once('=') else { continue };
+            let Some((key, val)) = line.split_once('=') else {
+                continue;
+            };
             let key = key.trim();
-            let val = val.trim().trim_matches('"');
+            let val = val.trim();
+            let val = val
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(val);
 
             if in_cmd_block {
                 match key {
-                    "prefix" => { cur_prefix = val.to_string(); continue; }
-                    "command" => { cur_command = val.to_string(); continue; }
-                    "display_result" => { cur_display = val == "true"; continue; }
+                    "prefix" => {
+                        cur_prefix = val.to_string();
+                        continue;
+                    }
+                    "command" => {
+                        cur_command = val.to_string();
+                        continue;
+                    }
+                    "display_result" => {
+                        cur_display = val == "true";
+                        continue;
+                    }
                     _ => {}
                 }
             }
 
             match key {
-                "columns" => { if let Ok(v) = val.parse() { base.columns = v; } }
-                "rows" => { if let Ok(v) = val.parse() { base.rows = v; } }
-                "icon_size" => { if let Ok(v) = val.parse() { base.icon_size = v; } }
+                "columns" => {
+                    if let Ok(v @ 1..=32) = val.parse::<usize>() {
+                        base.columns = v;
+                    }
+                }
+                "rows" => {
+                    if let Ok(v @ 1..=32) = val.parse::<usize>() {
+                        base.rows = v;
+                    }
+                }
+                "icon_size" => {
+                    if let Ok(v @ 1..=512) = val.parse::<u32>() {
+                        base.icon_size = v;
+                    }
+                }
                 _ => {}
             }
         }
 
         if in_cmd_block {
-            finalize_cmd(&mut base, &mut cur_prefix, &mut cur_command, &mut cur_display);
+            finalize_cmd(
+                &mut base,
+                &mut cur_prefix,
+                &mut cur_command,
+                &mut cur_display,
+            );
         }
 
         base
@@ -107,9 +141,11 @@ impl Config {
 }
 
 fn config_path(rel: &str) -> Option<std::path::PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(|h| std::path::PathBuf::from(h).join(".config/trebuchet").join(rel))
+    std::env::var("HOME").ok().map(|h| {
+        std::path::PathBuf::from(h)
+            .join(".config/trebuchet")
+            .join(rel)
+    })
 }
 
 impl Default for Config {
@@ -128,7 +164,43 @@ impl Default for Config {
 mod tests {
     use super::*;
 
-    fn defaults() -> Config { Config::default() }
+    fn defaults() -> Config {
+        Config::default()
+    }
+
+    #[test]
+    fn invalid_dimensions_keep_previous_values() {
+        for value in [
+            "0",
+            "33",
+            "18446744073709551615",
+            "999999999999999999999999",
+        ] {
+            let c = Config::parse(defaults(), &format!("columns = {value}\nrows = {value}"));
+            assert_eq!((c.columns, c.rows), (7, 5));
+        }
+        for value in ["0", "513", "4294967295"] {
+            assert_eq!(
+                Config::parse(defaults(), &format!("icon_size = {value}")).icon_size,
+                96
+            );
+        }
+    }
+
+    #[test]
+    fn incomplete_blocks_do_not_leak_fields() {
+        let c = Config::parse(defaults(), "[[command]]\nprefix = /first\ndisplay_result = true\n[[command]]\ncommand = echo second\n[[command]]\nprefix = /third\ncommand = echo third");
+        assert_eq!(c.commands.len(), 1);
+        assert_eq!(c.commands[0].prefix, "third");
+        assert!(!c.commands[0].display_result);
+    }
+
+    #[test]
+    fn preserves_shell_quotes_and_supports_outer_quotes() {
+        let c = Config::parse(defaults(), "[[command]]\nprefix = /hi\ncommand = echo \"hello world\"\n[[command]]\nprefix = \"/bye\"\ncommand = \"echo bye\"");
+        assert_eq!(c.commands[0].command, "echo \"hello world\"");
+        assert_eq!(c.commands[1].command, "echo bye");
+    }
 
     #[test]
     fn embedded_conf_parses_cleanly() {
@@ -154,7 +226,12 @@ mod tests {
 
     #[test]
     fn missing_key_keeps_base() {
-        let base = Config { columns: 4, rows: 3, icon_size: 48, ..Config::default() };
+        let base = Config {
+            columns: 4,
+            rows: 3,
+            icon_size: 48,
+            ..Config::default()
+        };
         let cfg = Config::parse(base, "icon_size = 64");
         assert_eq!(cfg.columns, 4);
         assert_eq!(cfg.rows, 3);
@@ -203,7 +280,10 @@ mod tests {
 
     #[test]
     fn command_display_result_true() {
-        let cfg = Config::parse(defaults(), "[[command]]\nprefix = /up\ncommand = uptime\ndisplay_result = true\n");
+        let cfg = Config::parse(
+            defaults(),
+            "[[command]]\nprefix = /up\ncommand = uptime\ndisplay_result = true\n",
+        );
         assert!(cfg.commands[0].display_result);
     }
 

@@ -5,9 +5,9 @@ use iced::{
 
 use crate::theme::Theme;
 
-const SEARCH_ID_LAUNCHER:  &str = "trebuchet_search_launcher";
-const SEARCH_ID_TERMINAL:  &str = "trebuchet_search_terminal";
-const SEARCH_ID_WINDOW:    &str = "trebuchet_search_window";
+const SEARCH_ID_LAUNCHER: &str = "trebuchet_search_launcher";
+const SEARCH_ID_TERMINAL: &str = "trebuchet_search_terminal";
+const SEARCH_ID_WINDOW: &str = "trebuchet_search_window";
 
 const SEARCH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
   fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -41,7 +41,10 @@ pub struct ShakeState {
 
 impl ShakeState {
     pub fn trigger() -> Self {
-        ShakeState { active: true, tick: 0 }
+        ShakeState {
+            active: true,
+            tick: 0,
+        }
     }
 
     pub fn advance(&mut self) {
@@ -68,16 +71,19 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
     on_input: impl Fn(String) -> Msg + 'a,
 ) -> Element<'a, Msg> {
     let (icon_bytes, search_id) = match icon {
-        SearchIcon::Search   => (SEARCH_SVG,   SEARCH_ID_LAUNCHER),
+        SearchIcon::Search => (SEARCH_SVG, SEARCH_ID_LAUNCHER),
         SearchIcon::Terminal => (TERMINAL_SVG, SEARCH_ID_TERMINAL),
-        SearchIcon::Window   => (WINDOW_SVG,   SEARCH_ID_WINDOW),
+        SearchIcon::Window => (WINDOW_SVG, SEARCH_ID_WINDOW),
     };
     let icon_widget: Element<'a, Msg> = svg(svg::Handle::from_memory(icon_bytes.to_vec()))
         .width(20)
         .height(20)
         .into();
-    let (text_color, placeholder_color, selection_color) =
-        (theme.search_text, theme.search_placeholder, theme.search_selection);
+    let (text_color, placeholder_color, selection_color) = (
+        theme.search_text,
+        theme.search_placeholder,
+        theme.search_selection,
+    );
     let input = text_input(placeholder, query)
         .id(Id::new(search_id))
         .on_input(on_input)
@@ -101,7 +107,11 @@ pub fn search_bar<'a, Msg: Clone + 'a>(
     let pill = container(inner)
         .style(move |_theme| container::Style {
             background: Some(Background::Color(bg)),
-            border: Border { radius: 12.0.into(), width: 1.0, color: border_color },
+            border: Border {
+                radius: 12.0.into(),
+                width: 1.0,
+                color: border_color,
+            },
             ..Default::default()
         })
         .padding([12, 20])

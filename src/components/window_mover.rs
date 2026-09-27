@@ -76,6 +76,8 @@ pub struct WindowMover {
     pub loading: bool,
     /// Active workspace ID populated on load; used as the move-target.
     active_workspace_id: i64,
+    request_id: u64,
+    moving: bool,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -83,11 +85,11 @@ pub struct WindowMover {
 #[derive(Debug, Clone)]
 pub enum Msg {
     QueryChanged(String),
-    WindowsLoaded(Vec<WindowData>, i64),
-    LoadFailed,
+    WindowsLoaded(u64, Vec<WindowData>, i64),
+    LoadFailed(u64),
     WindowActivated(usize),
     WindowHovered(Option<usize>),
-    WindowMoved(Result<(), String>),
+    WindowMoved(u64, Result<(), String>),
     GoToPage(usize),
     ShakeTick,
 }
@@ -106,11 +108,21 @@ impl WindowMover {
             shake: ShakeState::default(),
             loading: false,
             active_workspace_id: 0,
+            request_id: 0,
+            moving: false,
         }
+    }
+
+    pub fn leave(&mut self) {
+        self.request_id = self.request_id.wrapping_add(1);
+        self.moving = false;
+        self.loading = false;
     }
 
     /// Enter window-mover mode: clear state and kick off an async window fetch.
     pub fn reset(&mut self, args: String) -> Task<Msg> {
+        self.leave();
+        let request_id = self.request_id;
         self.query = args;
         self.windows = Vec::new();
         self.filtered = Vec::new();
@@ -120,11 +132,11 @@ impl WindowMover {
         self.shake = ShakeState::default();
         self.loading = true;
         self.active_workspace_id = 0;
-        Task::perform(fetch_windows(), |result| match result {
-            Ok((data, active_id)) => Msg::WindowsLoaded(data, active_id),
+        Task::perform(fetch_windows(), move |result| match result {
+            Ok((data, active_id)) => Msg::WindowsLoaded(request_id, data, active_id),
             Err(error) => {
                 eprintln!("Could not load windows: {error}");
-                Msg::LoadFailed
+                Msg::LoadFailed(request_id)
             }
         })
     }
@@ -166,8 +178,7 @@ impl WindowMover {
             return;
         }
         let current = self.selected.unwrap_or(self.page * page_size);
-        let next = (current as isize + delta)
-            .clamp(0, self.filtered.len() as isize - 1) as usize;
+        let next = (current as isize + delta).clamp(0, self.filtered.len() as isize - 1) as usize;
         self.selected = Some(next);
         self.page = next / page_size;
     }
@@ -215,11 +226,16 @@ impl WindowMover {
         (Task::none(), ComponentEvent::Handled)
     }
 
-    fn dispatch_move(&self, address: String) -> (Task<Msg>, ComponentEvent) {
+    fn dispatch_move(&mut self, address: String) -> (Task<Msg>, ComponentEvent) {
+        if self.moving || self.loading {
+            return (Task::none(), ComponentEvent::Handled);
+        }
+        self.moving = true;
+        let request_id = self.request_id;
         let active_ws = self.active_workspace_id;
         let task = Task::perform(
             async move { move_window(active_ws, address).await },
-            Msg::WindowMoved,
+            move |result| Msg::WindowMoved(request_id, result),
         );
         (task, ComponentEvent::Handled)
     }
@@ -243,7 +259,12 @@ impl Component for WindowMover {
         _apps: &[AppEntry],
         config: &Config,
     ) -> (Task<Msg>, ComponentEvent) {
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event
+        let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            ..
+        }) = event
         else {
             return (Task::none(), ComponentEvent::Handled);
         };
@@ -256,9 +277,10 @@ impl Component for WindowMover {
                 }
                 self.handle_submit(config)
             }
-            Key::Named(Named::Escape) => {
-                (Task::none(), ComponentEvent::CommandInvoked(SlashCommand::App, String::new()))
-            }
+            Key::Named(Named::Escape) => (
+                Task::none(),
+                ComponentEvent::CommandInvoked(SlashCommand::App, String::new()),
+            ),
             Key::Named(Named::PageDown) => (Task::none(), self.handle_page(1, config)),
             Key::Named(Named::PageUp) => (Task::none(), self.handle_page(-1, config)),
             Key::Named(Named::ArrowRight) if status == Status::Ignored => {
@@ -314,7 +336,10 @@ impl Component for WindowMover {
                 self.query = s;
             }
 
-            Msg::WindowsLoaded(data, active_id) => {
+            Msg::WindowsLoaded(request_id, data, active_id) => {
+                if request_id != self.request_id {
+                    return (Task::none(), ComponentEvent::Handled);
+                }
                 self.loading = false;
                 self.active_workspace_id = active_id;
                 self.windows = data
@@ -334,7 +359,10 @@ impl Component for WindowMover {
                 self.apply_filter(&q);
             }
 
-            Msg::LoadFailed => {
+            Msg::LoadFailed(request_id) => {
+                if request_id != self.request_id {
+                    return (Task::none(), ComponentEvent::Handled);
+                }
                 self.loading = false;
             }
 
@@ -348,13 +376,18 @@ impl Component for WindowMover {
                 self.hovered = idx;
             }
 
-            Msg::WindowMoved(Ok(())) => {
-                return (Task::none(), ComponentEvent::Exit);
-            }
-
-            Msg::WindowMoved(Err(error)) => {
-                eprintln!("Could not move window: {error}");
-                self.shake = ShakeState::trigger();
+            Msg::WindowMoved(request_id, result) => {
+                if request_id != self.request_id {
+                    return (Task::none(), ComponentEvent::Handled);
+                }
+                self.moving = false;
+                match result {
+                    Ok(()) => return (Task::none(), ComponentEvent::Exit),
+                    Err(error) => {
+                        eprintln!("Could not move window: {error}");
+                        self.shake = ShakeState::trigger();
+                    }
+                }
             }
 
             Msg::GoToPage(p) => {
@@ -378,7 +411,11 @@ impl Component for WindowMover {
         let page_slice = &self.filtered[start..end];
 
         let highlighted = self.selected.and_then(|s| {
-            if s >= start && s < end { Some(s - start) } else { None }
+            if s >= start && s < end {
+                Some(s - start)
+            } else {
+                None
+            }
         });
 
         let faded = config.theme.search_placeholder;
@@ -527,7 +564,10 @@ fn window_grid<'a>(
                                 None
                             },
                             border: if is_selected {
-                                Border { radius: 8.0.into(), ..Default::default() }
+                                Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                }
                             } else {
                                 Border::default()
                             },
@@ -761,7 +801,7 @@ mod tests {
         let mut mover = WindowMover::new();
         mover.query = "firefox".into();
         let (_, event) = mover.update(
-            Msg::WindowMoved(Err("Window not found".into())),
+            Msg::WindowMoved(mover.request_id, Err("Window not found".into())),
             &[],
             &Config::default(),
         );
@@ -773,7 +813,11 @@ mod tests {
     #[test]
     fn successful_move_closes_launcher() {
         let mut mover = WindowMover::new();
-        let (_, event) = mover.update(Msg::WindowMoved(Ok(())), &[], &Config::default());
+        let (_, event) = mover.update(
+            Msg::WindowMoved(mover.request_id, Ok(())),
+            &[],
+            &Config::default(),
+        );
         assert!(matches!(event, ComponentEvent::Exit));
     }
 
@@ -782,7 +826,9 @@ mod tests {
     async fn live_lua_dispatch_retry() {
         // Null cannot identify a live client. Exercise the real CLI exit status
         // and fallback without changing any windows in the user's session.
-        move_window(1, "0x0".into()).await.expect("Lua retry must succeed");
+        move_window(1, "0x0".into())
+            .await
+            .expect("Lua retry must succeed");
     }
 
     #[tokio::test]

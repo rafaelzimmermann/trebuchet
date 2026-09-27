@@ -15,14 +15,16 @@ impl SlashCommand {
         }
         let rest = &query[1..];
         let end = rest.find(char::is_whitespace)?;
-        let args = rest[end + 1..].to_string();
+        let args = rest[end..]
+            .trim_start_matches(char::is_whitespace)
+            .to_string();
         Some((
             match &rest[..end] {
-                "app"    => SlashCommand::App,
+                "app" => SlashCommand::App,
                 "config" => SlashCommand::Config,
-                "cmd"    => SlashCommand::Cmd,
-                "mv"     => SlashCommand::Mv,
-                s        => SlashCommand::Unknown(s.to_string()),
+                "cmd" => SlashCommand::Cmd,
+                "mv" => SlashCommand::Mv,
+                s => SlashCommand::Unknown(s.to_string()),
             },
             args,
         ))
@@ -33,10 +35,10 @@ impl SlashCommand {
     /// Enter-triggered dispatch (call with `format!("{} ", query.trim())`).
     pub fn as_nav_event(query: &str) -> Option<ComponentEvent> {
         match Self::detect(query) {
-            Some((Self::App, args))    => Some(ComponentEvent::CommandInvoked(Self::App, args)),
+            Some((Self::App, args)) => Some(ComponentEvent::CommandInvoked(Self::App, args)),
             Some((Self::Config, args)) => Some(ComponentEvent::CommandInvoked(Self::Config, args)),
-            Some((Self::Cmd, args))    => Some(ComponentEvent::CommandInvoked(Self::Cmd, args)),
-            Some((Self::Mv, args))     => Some(ComponentEvent::CommandInvoked(Self::Mv, args)),
+            Some((Self::Cmd, args)) => Some(ComponentEvent::CommandInvoked(Self::Cmd, args)),
+            Some((Self::Mv, args)) => Some(ComponentEvent::CommandInvoked(Self::Mv, args)),
             _ => None,
         }
     }
@@ -54,16 +56,32 @@ pub enum ComponentEvent {
 mod tests {
     use super::*;
 
+    #[test]
+    fn unicode_whitespace_preserves_argument_boundaries() {
+        for space in [' ', '\t', ' ', ' '] {
+            assert_eq!(
+                SlashCommand::detect(&format!("/mv{space}火狐")),
+                Some((SlashCommand::Mv, "火狐".into()))
+            );
+        }
+    }
+
     // ── SlashCommand::detect ──────────────────────────────────────────────────
 
     #[test]
     fn detect_cmd_variant() {
-        assert_eq!(SlashCommand::detect("/cmd "), Some((SlashCommand::Cmd, String::new())));
+        assert_eq!(
+            SlashCommand::detect("/cmd "),
+            Some((SlashCommand::Cmd, String::new()))
+        );
     }
 
     #[test]
     fn detect_config_variant() {
-        assert_eq!(SlashCommand::detect("/config "), Some((SlashCommand::Config, String::new())));
+        assert_eq!(
+            SlashCommand::detect("/config "),
+            Some((SlashCommand::Config, String::new()))
+        );
     }
 
     #[test]

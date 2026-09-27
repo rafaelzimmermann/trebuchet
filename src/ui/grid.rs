@@ -48,9 +48,7 @@ pub fn app_grid<'a, Msg: Clone + 'a>(
                         .size(13)
                         .color(config.theme.app_label);
 
-                    let cell = column![icon, label]
-                        .align_x(Alignment::Center)
-                        .spacing(6);
+                    let cell = column![icon, label].align_x(Alignment::Center).spacing(6);
 
                     let (label_color, selected_bg) =
                         (config.theme.app_label, config.theme.app_selected);
@@ -67,7 +65,10 @@ pub fn app_grid<'a, Msg: Clone + 'a>(
                                 None
                             },
                             border: if is_selected {
-                                Border { radius: 8.0.into(), ..Default::default() }
+                                Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                }
                             } else {
                                 Border::default()
                             },
@@ -82,10 +83,7 @@ pub fn app_grid<'a, Msg: Clone + 'a>(
                 cells.push(Space::new().width(Length::Fill).height(Length::Fill).into());
             }
 
-            row(cells)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+            row(cells).width(Length::Fill).height(Length::Fill).into()
         })
         .collect();
 
@@ -97,8 +95,5 @@ pub fn app_grid<'a, Msg: Clone + 'a>(
         rows.push(row(cells).width(Length::Fill).height(Length::Fill).into());
     }
 
-    column(rows)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    column(rows).width(Length::Fill).height(Length::Fill).into()
 }

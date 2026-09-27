@@ -194,16 +194,25 @@ fn dir_mtime_secs(path: &std::path::Path) -> Option<u64> {
 /// SVG beats PNG when both exist; subdirectories are skipped.
 fn scan_one_dir(dir: &std::path::Path) -> HashMap<String, PathBuf> {
     let mut map: HashMap<String, PathBuf> = HashMap::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return map };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return map;
+    };
     for entry in entries.flatten() {
         let Ok(ft) = entry.file_type() else { continue };
-        if ft.is_dir() { continue; }
+        if ft.is_dir() {
+            continue;
+        }
 
         let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         let new_is_svg = path.extension().and_then(|e| e.to_str()) == Some("svg");
-        let existing_is_svg =
-            map.get(stem).and_then(|p| p.extension()).and_then(|e| e.to_str()) == Some("svg");
+        let existing_is_svg = map
+            .get(stem)
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            == Some("svg");
 
         if !map.contains_key(stem) || (new_is_svg && !existing_is_svg) {
             map.insert(stem.to_string(), path);
@@ -221,7 +230,9 @@ fn build_dir_index_with_cache(
 ) -> Vec<(PathBuf, HashMap<String, PathBuf>)> {
     let mut index = Vec::with_capacity(dirs.len());
     for dir in dirs {
-        let Some(current_mtime) = dir_mtime_secs(dir) else { continue };
+        let Some(current_mtime) = dir_mtime_secs(dir) else {
+            continue;
+        };
 
         // Cache hit — same mtime → reuse cached file map without touching disk.
         if let Some(cached) = cache.dirs.get(dir) {
@@ -235,7 +246,10 @@ fn build_dir_index_with_cache(
         let files = scan_one_dir(dir);
         cache.dirs.insert(
             dir.clone(),
-            IconDirEntry { mtime_secs: current_mtime, files: files.clone() },
+            IconDirEntry {
+                mtime_secs: current_mtime,
+                files: files.clone(),
+            },
         );
         index.push((dir.clone(), files));
     }
@@ -395,18 +409,32 @@ pub(crate) fn icon_for_window(class: &str, initial_title: &str) -> Option<IconHa
     // 1. Exact class as icon name (e.g. "firefox" → "firefox.svg")
     resolve_icon(class)
         // 2. Lowercased class (e.g. "Code" → "code.svg" for VS Code)
-        .or_else(|| if lower != class { resolve_icon(&lower) } else { None })
+        .or_else(|| {
+            if lower != class {
+                resolve_icon(&lower)
+            } else {
+                None
+            }
+        })
         // 3. Last dot-segment of a reverse-DNS class, lowercased
         //    (e.g. "com.mitchellh.ghostty" → "ghostty")
         .or_else(|| {
             let stem = lower.rsplit('.').next().unwrap_or(lower.as_str());
-            if stem != lower { resolve_icon(stem) } else { None }
+            if stem != lower {
+                resolve_icon(stem)
+            } else {
+                None
+            }
         })
         // 4. initialTitle as a display-name lookup
         //    (covers apps whose class is an opaque bundle ID but whose initial
         //    title matches the human-readable name, e.g. "Ghostty")
         .or_else(|| {
-            if !initial_title.is_empty() { try_embedded_by_name(initial_title) } else { None }
+            if !initial_title.is_empty() {
+                try_embedded_by_name(initial_title)
+            } else {
+                None
+            }
         })
         // 5. Manifest wm_class lookup — explicit WM-class → embedded file mapping
         //    written by fetch-icons.sh from StartupWMClass= in .desktop files.
@@ -480,14 +508,16 @@ mod tests {
         let index = build_dir_index(&[dir.path().to_path_buf()]);
         assert_eq!(index.len(), 1);
         let (_, map) = &index[0];
-        assert!(map.contains_key("firefox"), "firefox stem should be indexed");
+        assert!(
+            map.contains_key("firefox"),
+            "firefox stem should be indexed"
+        );
         assert!(map.contains_key("code"), "code stem should be indexed");
     }
 
     #[test]
     fn build_dir_index_skips_missing_dirs() {
-        let index =
-            build_dir_index(&[PathBuf::from("/nonexistent/trebuchet/test/abc")]);
+        let index = build_dir_index(&[PathBuf::from("/nonexistent/trebuchet/test/abc")]);
         assert!(index.is_empty());
     }
 
@@ -498,8 +528,7 @@ mod tests {
         fs::write(d1.path().join("a.svg"), b"").unwrap();
         fs::write(d2.path().join("b.svg"), b"").unwrap();
 
-        let index =
-            build_dir_index(&[d1.path().to_path_buf(), d2.path().to_path_buf()]);
+        let index = build_dir_index(&[d1.path().to_path_buf(), d2.path().to_path_buf()]);
         assert_eq!(index.len(), 2);
         assert_eq!(index[0].0, d1.path());
         assert_eq!(index[1].0, d2.path());
@@ -520,8 +549,9 @@ mod tests {
         for dir in [dir_png_first, dir_svg_first] {
             let index = build_dir_index(&[dir.path().to_path_buf()]);
             let (_, map) = &index[0];
-            let path =
-                map.get("app").expect("app should be indexed regardless of order");
+            let path = map
+                .get("app")
+                .expect("app should be indexed regardless of order");
             assert_eq!(
                 path.extension().and_then(|e| e.to_str()),
                 Some("svg"),
@@ -679,7 +709,8 @@ mod tests {
     fn icon_search_dirs_includes_pixmaps() {
         let dirs = super::icon_search_dirs();
         assert!(
-            dirs.iter().any(|p| p.to_string_lossy() == "/usr/share/pixmaps"),
+            dirs.iter()
+                .any(|p| p.to_string_lossy() == "/usr/share/pixmaps"),
             "pixmaps should remain: {dirs:?}"
         );
     }
@@ -728,7 +759,10 @@ mod tests {
         let mut dirs_map = HashMap::new();
         dirs_map.insert(
             dir.path().to_path_buf(),
-            IconDirEntry { mtime_secs: mtime, files },
+            IconDirEntry {
+                mtime_secs: mtime,
+                files,
+            },
         );
         let mut cache = IconDirCache {
             version: ICON_CACHE_VERSION,
@@ -780,7 +814,10 @@ mod tests {
 
         let index = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
         let (_, map) = &index[0];
-        assert!(map.contains_key("new"), "new file should be visible after rescan");
+        assert!(
+            map.contains_key("new"),
+            "new file should be visible after rescan"
+        );
         assert!(map.contains_key("old"));
     }
 
@@ -792,19 +829,24 @@ mod tests {
         let mut cache = IconDirCache::default();
         assert!(cache.dirs.is_empty());
         let _ = build_dir_index_with_cache(&[dir.path().to_path_buf()], &mut cache);
-        assert_eq!(cache.dirs.len(), 1, "dir should be added to cache after scan");
+        assert_eq!(
+            cache.dirs.len(),
+            1,
+            "dir should be added to cache after scan"
+        );
         assert!(cache.dirs[dir.path()].files.contains_key("app"));
     }
 
     #[test]
     fn build_dir_index_with_cache_skips_missing_dirs() {
         let mut cache = IconDirCache::default();
-        let index = build_dir_index_with_cache(
-            &[PathBuf::from("/nonexistent/trebuchet/abc")],
-            &mut cache,
-        );
+        let index =
+            build_dir_index_with_cache(&[PathBuf::from("/nonexistent/trebuchet/abc")], &mut cache);
         assert!(index.is_empty());
-        assert!(cache.dirs.is_empty(), "missing dir should not pollute cache");
+        assert!(
+            cache.dirs.is_empty(),
+            "missing dir should not pollute cache"
+        );
     }
 
     #[test]
@@ -817,9 +859,15 @@ mod tests {
         let mut dirs_map = HashMap::new();
         dirs_map.insert(
             PathBuf::from("/usr/share/icons/hicolor/scalable/apps"),
-            IconDirEntry { mtime_secs: 1_700_000_000, files },
+            IconDirEntry {
+                mtime_secs: 1_700_000_000,
+                files,
+            },
         );
-        let cache = IconDirCache { version: ICON_CACHE_VERSION, dirs: dirs_map };
+        let cache = IconDirCache {
+            version: ICON_CACHE_VERSION,
+            dirs: dirs_map,
+        };
 
         assert!(save_icon_cache_to(&cache_path, &cache).is_some());
         let loaded = load_icon_cache_from(&cache_path).expect("should load");
@@ -827,8 +875,7 @@ mod tests {
         assert_eq!(loaded.dirs.len(), 1);
         assert!(loaded
             .dirs
-            .get(PathBuf::from("/usr/share/icons/hicolor/scalable/apps").as_path())
-            .is_some());
+            .contains_key(PathBuf::from("/usr/share/icons/hicolor/scalable/apps").as_path()));
     }
 
     #[test]

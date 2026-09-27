@@ -89,10 +89,7 @@ impl AppLauncher {
         if let Some((cmd, args)) = SlashCommand::detect(&self.query) {
             if matches!(
                 cmd,
-                SlashCommand::App
-                    | SlashCommand::Config
-                    | SlashCommand::Cmd
-                    | SlashCommand::Mv
+                SlashCommand::App | SlashCommand::Config | SlashCommand::Cmd | SlashCommand::Mv
             ) {
                 self.query.clear();
                 self.apply_filter(apps, "");
@@ -124,13 +121,23 @@ impl AppLauncher {
         if let Some(sel) = self.selected {
             if let Some(&app_idx) = self.filtered.get(sel) {
                 if let Some(app) = apps.get(app_idx) {
-                    launch_app(&app.exec, app.terminal);
-                    std::process::exit(0);
+                    return self.activate(app);
                 }
             }
         }
         self.shake = ShakeState::trigger();
         (Task::none(), ComponentEvent::Handled)
+    }
+
+    fn activate(&mut self, app: &AppEntry) -> (Task<Msg>, ComponentEvent) {
+        match launch_app(&app.exec, app.terminal) {
+            Ok(()) => (Task::none(), ComponentEvent::Exit),
+            Err(error) => {
+                eprintln!("{error}");
+                self.shake = ShakeState::trigger();
+                (Task::none(), ComponentEvent::Handled)
+            }
+        }
     }
 
     fn handle_page(&mut self, delta: i32, config: &Config) -> ComponentEvent {
@@ -255,8 +262,7 @@ impl Component for AppLauncher {
             }
             Msg::AppActivated(idx) => {
                 if let Some(app) = apps.get(idx) {
-                    launch_app(&app.exec.clone(), app.terminal);
-                    std::process::exit(0);
+                    return self.activate(app);
                 }
             }
             Msg::GoToPage(p) => {
@@ -361,7 +367,7 @@ mod tests {
             .iter()
             .map(|n| AppEntry {
                 name: n.to_string(),
-                exec: n.to_string(),
+                exec: vec![n.to_string()],
                 terminal: false,
                 icon_name: None,
                 icon: None,

@@ -7,8 +7,10 @@ use iced_layershell::{
 mod app;
 mod components;
 mod config;
+mod desktop_exec;
 mod icons;
 mod launcher;
+mod process;
 mod theme;
 mod ui;
 
@@ -36,10 +38,12 @@ fn main() -> iced_layershell::Result {
         .subscription(app::subscription)
         // Fully transparent window — the rounded container in view() provides
         // the visible background so the compositor can clip the corners cleanly.
-        .style(|_state: &app::Trebuchet, _theme: &iced::Theme| iced::theme::Style {
-            background_color: iced::Color::TRANSPARENT,
-            text_color: iced::Color::WHITE,
-        })
+        .style(
+            |_state: &app::Trebuchet, _theme: &iced::Theme| iced::theme::Style {
+                background_color: iced::Color::TRANSPARENT,
+                text_color: iced::Color::WHITE,
+            },
+        )
         .settings(settings)
         .run()
 }

@@ -67,56 +67,58 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            background:          hex("#14141eea"),
-            search_background:   hex("#ffffff1e"),
-            search_border:       hex("#ffffff38"),
-            search_text:         Color::WHITE,
-            search_placeholder:  hex("#9999b2"),
-            search_selection:    hex("#6680e673"),
-            app_label:           Color::WHITE,
-            app_selected:        hex("#ffffff26"),
-            dot_active:          Color::WHITE,
-            dot_inactive:        hex("#ffffff59"),
-            ai_idle:             hex("#999999"),
-            ai_error:            hex("#ff6666"),
-            ai_panel:            hex("#0d0d17"),
-            ai_code_background:  hex("#2e2e42"),
-            ai_code_text:        hex("#f2c780"),
-            ai_link:             hex("#73bfff"),
+            background: hex("#14141eea"),
+            search_background: hex("#ffffff1e"),
+            search_border: hex("#ffffff38"),
+            search_text: Color::WHITE,
+            search_placeholder: hex("#9999b2"),
+            search_selection: hex("#6680e673"),
+            app_label: Color::WHITE,
+            app_selected: hex("#ffffff26"),
+            dot_active: Color::WHITE,
+            dot_inactive: hex("#ffffff59"),
+            ai_idle: hex("#999999"),
+            ai_error: hex("#ff6666"),
+            ai_panel: hex("#0d0d17"),
+            ai_code_background: hex("#2e2e42"),
+            ai_code_text: hex("#f2c780"),
+            ai_link: hex("#73bfff"),
             terminal_background: hex("#0a0a0f"),
-            terminal_prompt:     hex("#66d966"),
-            terminal_output:     hex("#e0e0e0"),
-            button_background:   hex("#ffffff1a"),
-            copy_feedback:       hex("#80e699"),
+            terminal_prompt: hex("#66d966"),
+            terminal_output: hex("#e0e0e0"),
+            button_background: hex("#ffffff1a"),
+            copy_feedback: hex("#80e699"),
         }
     }
 }
 
 impl Theme {
     pub fn apply_key(&mut self, key: &str, value: &str) {
-        let Some(color) = parse_color(value) else { return };
+        let Some(color) = parse_color(value) else {
+            return;
+        };
         match key {
-            "background"          => self.background          = color,
-            "search_background"   => self.search_background   = color,
-            "search_border"       => self.search_border       = color,
-            "search_text"         => self.search_text         = color,
-            "search_placeholder"  => self.search_placeholder  = color,
-            "search_selection"    => self.search_selection     = color,
-            "app_label"           => self.app_label           = color,
-            "app_selected"        => self.app_selected        = color,
-            "dot_active"          => self.dot_active          = color,
-            "dot_inactive"        => self.dot_inactive        = color,
-            "ai_idle"             => self.ai_idle             = color,
-            "ai_error"            => self.ai_error            = color,
-            "ai_panel"            => self.ai_panel            = color,
-            "ai_code_background"  => self.ai_code_background  = color,
-            "ai_code_text"        => self.ai_code_text        = color,
-            "ai_link"             => self.ai_link             = color,
+            "background" => self.background = color,
+            "search_background" => self.search_background = color,
+            "search_border" => self.search_border = color,
+            "search_text" => self.search_text = color,
+            "search_placeholder" => self.search_placeholder = color,
+            "search_selection" => self.search_selection = color,
+            "app_label" => self.app_label = color,
+            "app_selected" => self.app_selected = color,
+            "dot_active" => self.dot_active = color,
+            "dot_inactive" => self.dot_inactive = color,
+            "ai_idle" => self.ai_idle = color,
+            "ai_error" => self.ai_error = color,
+            "ai_panel" => self.ai_panel = color,
+            "ai_code_background" => self.ai_code_background = color,
+            "ai_code_text" => self.ai_code_text = color,
+            "ai_link" => self.ai_link = color,
             "terminal_background" => self.terminal_background = color,
-            "terminal_prompt"     => self.terminal_prompt     = color,
-            "terminal_output"     => self.terminal_output     = color,
-            "button_background"   => self.button_background   = color,
-            "copy_feedback"       => self.copy_feedback       = color,
+            "terminal_prompt" => self.terminal_prompt = color,
+            "terminal_output" => self.terminal_output = color,
+            "button_background" => self.button_background = color,
+            "copy_feedback" => self.copy_feedback = color,
             _ => {}
         }
     }
@@ -130,8 +132,12 @@ impl Theme {
         let mut theme = Theme::default();
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
-            let Some((key, val)) = line.split_once('=') else { continue };
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, val)) = line.split_once('=') else {
+                continue;
+            };
             theme.apply_key(key.trim(), val.trim().trim_matches('"'));
         }
         Some(theme)
@@ -141,8 +147,11 @@ impl Theme {
 /// Parse `#RRGGBB` or `#RRGGBBAA` hex string into an iced Color.
 /// Each channel is divided by 255 to produce a 0.0–1.0 linear value.
 pub fn parse_color(s: &str) -> Option<Color> {
-    let s = s.trim().trim_start_matches('#');
-    if s.len() < 6 { return None; }
+    let s = s.trim();
+    let s = s.strip_prefix('#').unwrap_or(s);
+    if !matches!(s.len(), 6 | 8) || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
     let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
     let g = u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0;
     let b = u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0;
@@ -157,4 +166,34 @@ pub fn parse_color(s: &str) -> Option<Color> {
 /// Hex colour literal used in Default — panics only if a constant is wrong.
 fn hex(s: &str) -> Color {
     parse_color(s).expect("invalid hex in Theme::default()")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn malformed_colors_never_panic() {
+        for s in [
+            "#€0000",
+            "#💜00",
+            "",
+            "#12345",
+            "#1234567",
+            "#123456789",
+            "##123456",
+            "#gg0000",
+        ] {
+            assert!(parse_color(s).is_none(), "{s}");
+        }
+        assert_eq!(
+            parse_color("#FF008080"),
+            Some(Color {
+                r: 1.0,
+                g: 0.0,
+                b: 128.0 / 255.0,
+                a: 128.0 / 255.0
+            })
+        );
+        assert!(parse_color("abcdef").is_some());
+    }
 }

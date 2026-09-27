@@ -118,6 +118,14 @@ fn persist_theme(name: &str) {
 // ── Event application ─────────────────────────────────────────────────────────
 
 fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
+    if matches!(&event, ComponentEvent::CommandInvoked(command, _) if !matches!(command, SlashCommand::Unknown(_)))
+    {
+        match state.active {
+            ActiveComponent::Cmd => state.cmd.leave(),
+            ActiveComponent::WindowMover => state.window_mover.leave(),
+            _ => {}
+        }
+    }
     match event {
         ComponentEvent::Handled => {}
         ComponentEvent::Exit => std::process::exit(0),
@@ -219,19 +227,30 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
         Message::IcedEvent(event, status) => {
             let (task, evt) = match state.active {
                 ActiveComponent::Launcher => {
-                    let (t, e) = state.launcher.handle_event(&event, status, &state.apps, &state.config);
+                    let (t, e) =
+                        state
+                            .launcher
+                            .handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Launcher), e)
                 }
                 ActiveComponent::Cmd => {
-                    let (t, e) = state.cmd.handle_event(&event, status, &state.apps, &state.config);
+                    let (t, e) = state
+                        .cmd
+                        .handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Cmd), e)
                 }
                 ActiveComponent::Settings => {
-                    let (t, e) = state.settings.handle_event(&event, status, &state.apps, &state.config);
+                    let (t, e) =
+                        state
+                            .settings
+                            .handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::Settings), e)
                 }
                 ActiveComponent::WindowMover => {
-                    let (t, e) = state.window_mover.handle_event(&event, status, &state.apps, &state.config);
+                    let (t, e) =
+                        state
+                            .window_mover
+                            .handle_event(&event, status, &state.apps, &state.config);
                     (t.map(Message::WindowMover), e)
                 }
             };
@@ -249,18 +268,19 @@ pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
 
 pub fn view(state: &Trebuchet) -> Element<'_, Message> {
     let content = match state.active {
-        ActiveComponent::Launcher => {
-            state.launcher.view(&state.apps, &state.config).map(Message::Launcher)
-        }
-        ActiveComponent::Cmd => {
-            state.cmd.view(&state.apps, &state.config).map(Message::Cmd)
-        }
-        ActiveComponent::Settings => {
-            state.settings.view(&state.apps, &state.config).map(Message::Settings)
-        }
-        ActiveComponent::WindowMover => {
-            state.window_mover.view(&state.apps, &state.config).map(Message::WindowMover)
-        }
+        ActiveComponent::Launcher => state
+            .launcher
+            .view(&state.apps, &state.config)
+            .map(Message::Launcher),
+        ActiveComponent::Cmd => state.cmd.view(&state.apps, &state.config).map(Message::Cmd),
+        ActiveComponent::Settings => state
+            .settings
+            .view(&state.apps, &state.config)
+            .map(Message::Settings),
+        ActiveComponent::WindowMover => state
+            .window_mover
+            .view(&state.apps, &state.config)
+            .map(Message::WindowMover),
     };
 
     let bg = state.config.theme.background;
@@ -269,7 +289,10 @@ pub fn view(state: &Trebuchet) -> Element<'_, Message> {
         .height(Length::Fill)
         .style(move |_theme| container::Style {
             background: Some(Background::Color(bg)),
-            border: Border { radius: 16.0.into(), ..Default::default() },
+            border: Border {
+                radius: 16.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -288,6 +311,19 @@ fn on_event(event: Event, status: Status, _id: iced::window::Id) -> Option<Messa
         Event::Keyboard(_) => Some(Message::IcedEvent(event, status)),
         _ => None,
     }
+}
+
+// ── Subscription ──────────────────────────────────────────────────────────────
+
+pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
+    let events = event::listen_with(on_event);
+    let component = match state.active {
+        ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
+        ActiveComponent::Cmd => state.cmd.subscription().map(Message::Cmd),
+        ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
+        ActiveComponent::WindowMover => state.window_mover.subscription().map(Message::WindowMover),
+    };
+    Subscription::batch([events, component])
 }
 
 #[cfg(test)]
@@ -394,10 +430,7 @@ mod tests {
         cmd.query = "partial".to_string(); // pretend user is typing in another panel
         state.cmd = cmd;
 
-        let _ = update(
-            &mut state,
-            Message::ConfigLoaded(Config::default()),
-        );
+        let _ = update(&mut state, Message::ConfigLoaded(Config::default()));
         assert_eq!(state.cmd.query, "partial", "Cmd state must be untouched");
     }
 
@@ -406,7 +439,7 @@ mod tests {
     fn app_entry(name: &str) -> crate::launcher::AppEntry {
         crate::launcher::AppEntry {
             name: name.to_string(),
-            exec: format!("{name} %U"),
+            exec: vec![name.to_string()],
             terminal: false,
             icon_name: Some(name.to_string()),
             icon: None,
@@ -447,17 +480,4 @@ mod tests {
         let _ = update(&mut state, Message::IconsLoaded(vec![]));
         assert!(state.apps.iter().all(|a| a.icon.is_none()));
     }
-}
-
-// ── Subscription ──────────────────────────────────────────────────────────────
-
-pub fn subscription(state: &Trebuchet) -> Subscription<Message> {
-    let events = event::listen_with(on_event);
-    let component = match state.active {
-        ActiveComponent::Launcher => state.launcher.subscription().map(Message::Launcher),
-        ActiveComponent::Cmd => state.cmd.subscription().map(Message::Cmd),
-        ActiveComponent::Settings => state.settings.subscription().map(Message::Settings),
-        ActiveComponent::WindowMover => state.window_mover.subscription().map(Message::WindowMover),
-    };
-    Subscription::batch([events, component])
 }

@@ -6,7 +6,7 @@ use crate::icons::{self, IconHandle};
 #[derive(Debug, Clone)]
 pub struct AppEntry {
     pub name: String,
-    pub exec: String,
+    pub exec: Vec<String>,
     pub terminal: bool,
     /// Raw `Icon=` value from the .desktop file. Preserved so icon resolution
     /// can be deferred to an async task without re-parsing.
@@ -26,10 +26,7 @@ pub struct AppEntry {
 ///   3. Otherwise prefer an embedded icon looked up by display name (covers
 ///      apps whose `Icon=` resolves to a low-res PNG, e.g. Chrome web apps).
 ///   4. Fall back to the system lookup result.
-pub(crate) fn resolve_app_icon(
-    name: &str,
-    icon_name: Option<&str>,
-) -> Option<IconHandle> {
+pub(crate) fn resolve_app_icon(name: &str, icon_name: Option<&str>) -> Option<IconHandle> {
     let system_icon = icon_name.and_then(icons::resolve_icon);
     match &system_icon {
         Some(IconHandle::Vector(_)) => system_icon,
@@ -102,34 +99,33 @@ pub fn scan_applications() -> Vec<AppEntry> {
                 None => return None,
             };
 
-            let exec = match desktop.exec() {
-                Some(e) => e.to_string(),
-                None => return None,
-            };
-
             let icon_name = desktop.icon().map(|s| s.to_string());
-            let terminal = content.lines().any(|l| l.trim() == "Terminal=true");
+            let exec = match crate::desktop_exec::parse(
+                desktop.exec()?,
+                &name,
+                icon_name.as_deref(),
+                &path.to_string_lossy(),
+            ) {
+                Ok(args) => args,
+                Err(error) => {
+                    eprintln!("Invalid desktop entry {}: {error}", path.display());
+                    return None;
+                }
+            };
+            let terminal = desktop.terminal();
 
-            Some(AppEntry { name, exec, terminal, icon_name, icon: None })
+            Some(AppEntry {
+                name,
+                exec,
+                terminal,
+                icon_name,
+                icon: None,
+            })
         })
         .collect();
 
     entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     entries
-}
-
-/// Strip desktop entry field codes (§ 4 of the spec) from an Exec value.
-pub(crate) fn clean_exec(exec: &str) -> String {
-    exec.split_whitespace()
-        .filter(|t| {
-            !matches!(
-                *t,
-                "%f" | "%F" | "%u" | "%U" | "%d" | "%D" | "%n" | "%N" | "%i" | "%c" | "%k"
-                    | "%v" | "%m"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Find an available terminal emulator, returning (binary, exec_flag).
@@ -161,73 +157,36 @@ fn find_terminal() -> Option<(&'static str, &'static str)> {
         .copied()
 }
 
-/// Strip desktop field codes and spawn the application.
-/// When `terminal` is true the exec is wrapped with a terminal emulator.
-pub fn launch_app(exec: &str, terminal: bool) {
-    let clean = clean_exec(exec);
-
-    if terminal {
-        if let Some((term, flag)) = find_terminal() {
-            let _ = std::process::Command::new("sh")
-                .args(["-c", &format!("{term} {flag} {clean}")])
-                .spawn();
-            return;
-        }
-        // No terminal found — fall through and try to launch directly.
-    }
-
-    let mut parts = clean.split_whitespace();
-    if let Some(cmd) = parts.next() {
-        let args: Vec<&str> = parts.collect();
-        let _ = std::process::Command::new(cmd).args(args).spawn();
-    }
+/// Launch an already parsed desktop entry, preserving every argument boundary.
+pub fn launch_app(exec: &[String], terminal: bool) -> Result<(), String> {
+    let (program, args) = exec.split_first().ok_or("Empty application command")?;
+    let mut command = if terminal {
+        let (term, flag) = find_terminal().ok_or("No supported terminal emulator found")?;
+        let mut command = std::process::Command::new(term);
+        command
+            .args(flag.split_whitespace())
+            .arg(program)
+            .args(args);
+        command
+    } else {
+        let mut command = std::process::Command::new(program);
+        command.args(args);
+        command
+    };
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not launch {program}: {e}"))?;
+    // Reap the child if the launcher stays alive; closing the launcher must not
+    // kill a successfully started application.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── clean_exec ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn strips_common_field_codes() {
-        assert_eq!(clean_exec("firefox %U"), "firefox");
-        assert_eq!(clean_exec("code %F"), "code");
-        assert_eq!(clean_exec("gimp %f"), "gimp");
-        assert_eq!(clean_exec("xdg-open %u"), "xdg-open");
-    }
-
-    #[test]
-    fn strips_all_field_codes() {
-        let all = "app %f %F %u %U %d %D %n %N %i %c %k %v %m";
-        assert_eq!(clean_exec(all), "app");
-    }
-
-    #[test]
-    fn preserves_real_args() {
-        assert_eq!(
-            clean_exec("env FOO=bar myapp --flag %U"),
-            "env FOO=bar myapp --flag"
-        );
-    }
-
-    #[test]
-    fn no_field_codes_unchanged() {
-        assert_eq!(
-            clean_exec("alacritty --title Launcher"),
-            "alacritty --title Launcher"
-        );
-    }
-
-    #[test]
-    fn empty_string() {
-        assert_eq!(clean_exec(""), "");
-    }
-
-    #[test]
-    fn only_field_codes_yields_empty() {
-        assert_eq!(clean_exec("%f %F %u %U"), "");
-    }
 
     // ── resolve_app_icon ────────────────────────────────────────────────────
     // These tests rely on the embedded icon set bundled at compile time.
@@ -236,7 +195,7 @@ mod tests {
     fn app(name: &str, icon_name: Option<&str>) -> AppEntry {
         AppEntry {
             name: name.to_string(),
-            exec: format!("{name} %U"),
+            exec: vec![name.to_string()],
             terminal: false,
             icon_name: icon_name.map(String::from),
             icon: None,
@@ -251,17 +210,19 @@ mod tests {
     #[test]
     fn resolve_app_icon_finds_embedded_by_name() {
         // No icon_name supplied, but the display name matches an embedded icon.
-        let handle = resolve_app_icon("Firefox", None)
-            .expect("firefox.svg is embedded; should resolve");
-        assert!(matches!(handle, IconHandle::Vector(_)),
-            "embedded icons are SVG");
+        let handle =
+            resolve_app_icon("Firefox", None).expect("firefox.svg is embedded; should resolve");
+        assert!(
+            matches!(handle, IconHandle::Vector(_)),
+            "embedded icons are SVG"
+        );
     }
 
     #[test]
     fn resolve_app_icon_finds_embedded_by_icon_name() {
         // icon_name is a known embedded key.
-        let handle = resolve_app_icon("ignored", Some("firefox"))
-            .expect("firefox icon_name should resolve");
+        let handle =
+            resolve_app_icon("ignored", Some("firefox")).expect("firefox icon_name should resolve");
         assert!(matches!(handle, IconHandle::Vector(_)));
     }
 
@@ -272,7 +233,10 @@ mod tests {
         // (We can’t mock the system path here, but we can confirm the embedded
         // lookup is used when icon_name doesn’t resolve.)
         let handle = resolve_app_icon("Firefox", Some("does-not-resolve"));
-        assert!(handle.is_some(), "display-name fallback should still find it");
+        assert!(
+            handle.is_some(),
+            "display-name fallback should still find it"
+        );
     }
 
     // ── resolve_all_icons ───────────────────────────────────────────────────
@@ -299,10 +263,7 @@ mod tests {
 
     #[test]
     fn resolve_all_icons_preserves_order() {
-        let apps = vec![
-            app("Firefox", Some("firefox")),
-            app("Code", Some("code")),
-        ];
+        let apps = vec![app("Firefox", Some("firefox")), app("Code", Some("code"))];
         let icons = resolve_all_icons(&apps);
         // Both should be Vector handles; we can’t distinguish them without
         // inspecting handle contents, but the order matches input order.
