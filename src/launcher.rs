@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::icons::{self, IconHandle};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppEntry {
     pub name: String,
     pub exec: Vec<String>,
@@ -11,9 +11,9 @@ pub struct AppEntry {
     /// Raw `Icon=` value from the .desktop file. Preserved so icon resolution
     /// can be deferred to an async task without re-parsing.
     pub icon_name: Option<String>,
-    /// Resolved icon handle. `None` until the lazy icon-resolution task lands
-    /// (`Message::IconsLoaded`); the grid renders the fallback icon in the
-    /// meantime so the launcher can appear immediately.
+    /// Resolved icon handle. `None` until this app's icon batch completes;
+    /// the grid renders a same-size fallback while loading or if none exists.
+    #[serde(skip)]
     pub icon: Option<IconHandle>,
 }
 
@@ -40,6 +40,63 @@ pub fn resolve_all_icons(apps: &[AppEntry]) -> Vec<Option<IconHandle>> {
     apps.par_iter()
         .map(|app| resolve_app_icon(&app.name, app.icon_name.as_deref()))
         .collect()
+}
+
+const APP_CACHE_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct AppCache {
+    version: u32,
+    apps: Vec<AppEntry>,
+}
+
+fn app_cache_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+    Some(base.join("trebuchet/applications.json"))
+}
+
+fn read_app_cache(path: &std::path::Path) -> Option<Vec<AppEntry>> {
+    let cache: AppCache = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    (cache.version == APP_CACHE_VERSION).then_some(cache.apps)
+}
+
+pub fn cached_applications() -> Option<Vec<AppEntry>> {
+    read_app_cache(&app_cache_path()?)
+}
+
+fn write_app_cache(path: &std::path::Path, apps: &[AppEntry]) -> std::io::Result<()> {
+    let cache = AppCache {
+        version: APP_CACHE_VERSION,
+        apps: apps.to_vec(),
+    };
+    let data = serde_json::to_vec(&cache)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // A launcher may exit mid-write. Never expose a partially written cache.
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&temporary, data)?;
+    std::fs::rename(temporary, path)
+}
+
+pub fn scan_and_cache_applications() -> Vec<AppEntry> {
+    let apps = scan_applications();
+    if let Some(path) = app_cache_path() {
+        let _ = write_app_cache(&path, &apps);
+    }
+    apps
+}
+
+impl AppEntry {
+    pub fn same_application(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.exec == other.exec
+            && self.terminal == other.terminal
+            && self.icon_name == other.icon_name
+    }
 }
 
 pub fn scan_applications() -> Vec<AppEntry> {
@@ -269,5 +326,36 @@ mod tests {
         // inspecting handle contents, but the order matches input order.
         assert!(icons[0].is_some());
         assert!(icons[1].is_some());
+    }
+    #[test]
+    fn application_cache_round_trip_preserves_launch_arguments() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("nested/applications.json");
+        let mut entry = app("My App", Some("my-icon"));
+        entry.exec = vec!["program".into(), "argument with spaces".into()];
+        entry.terminal = true;
+        entry.icon = Some(IconHandle::Vector(iced::widget::svg::Handle::from_memory(
+            vec![],
+        )));
+        write_app_cache(&path, &[entry.clone()]).unwrap();
+        let loaded = read_app_cache(&path).unwrap();
+        assert!(loaded[0].same_application(&entry));
+        assert!(
+            loaded[0].icon.is_none(),
+            "runtime handles are not serialized"
+        );
+        write_app_cache(&path, &[]).unwrap();
+        assert!(read_app_cache(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn application_cache_missing_corrupt_and_old_version_fall_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("applications.json");
+        assert!(read_app_cache(&path).is_none());
+        std::fs::write(&path, b"partial json").unwrap();
+        assert!(read_app_cache(&path).is_none());
+        std::fs::write(&path, br#"{"version":0,"apps":[]}"#).unwrap();
+        assert!(read_app_cache(&path).is_none());
     }
 }

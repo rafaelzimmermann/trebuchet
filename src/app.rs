@@ -14,7 +14,7 @@ use crate::components::component::Component;
 use crate::components::settings::{self, Settings};
 use crate::components::window_mover::{self, WindowMover};
 use crate::config::Config;
-use crate::launcher::{scan_applications, AppEntry};
+use crate::launcher::{cached_applications, scan_and_cache_applications, AppEntry};
 // ── Active component ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +35,9 @@ pub struct Trebuchet {
     pub cmd: Cmd,
     pub settings: Settings,
     pub window_mover: WindowMover,
+    icon_generation: u64,
+    icons_resolved: Vec<bool>,
+    icons_loading: bool,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -45,11 +48,10 @@ pub enum Message {
     Close,
     /// Absorbs clicks anywhere inside the window so they don't propagate as Ignored.
     Absorb,
+    InitialAppsLoaded(Vec<AppEntry>, bool),
     AppsLoaded(Vec<AppEntry>),
-    /// Delivered when the lazy icon-resolution task finishes. The grid has
-    /// been visible with fallback icons since `AppsLoaded`; this swaps in the
-    /// real `IconHandle`s without rearranging the apps.
-    IconsLoaded(Vec<Option<crate::icons::IconHandle>>),
+    /// Results are tied to a catalogue generation and explicit app indices.
+    IconsLoaded(u64, Vec<(usize, Option<crate::icons::IconHandle>)>),
     /// Delivered when the async `Config::load` started in `boot` completes.
     /// The initial frame is rendered with `Config::default()` so the window
     /// can appear immediately; this swaps in the user's real config.
@@ -65,7 +67,7 @@ pub enum Message {
 
 pub fn boot() -> (Trebuchet, Task<Message>) {
     // Start with the default config so the window can appear immediately.
-    // The real `Config::load()` runs in parallel with `scan_applications`
+    // The real `Config::load()` runs in parallel with the cached app-list load
     // and replaces this placeholder via `Message::ConfigLoaded` as soon as it
     // completes. This matters at cold boot where reading trebuchet.conf +
     // current-theme + themes/<name>.conf from cold disk can take 30–100 ms.
@@ -77,15 +79,21 @@ pub fn boot() -> (Trebuchet, Task<Message>) {
         cmd: Cmd::new(),
         settings: Settings::new(),
         window_mover: WindowMover::new(),
+        icon_generation: 0,
+        icons_resolved: Vec::new(),
+        icons_loading: false,
     };
     let task = Task::batch([
         Task::perform(
             async {
-                tokio::task::spawn_blocking(scan_applications)
-                    .await
-                    .unwrap_or_default()
+                tokio::task::spawn_blocking(|| match cached_applications() {
+                    Some(apps) => (apps, true),
+                    None => (scan_and_cache_applications(), false),
+                })
+                .await
+                .unwrap_or_default()
             },
-            Message::AppsLoaded,
+            |(apps, cached)| Message::InitialAppsLoaded(apps, cached),
         ),
         Task::perform(
             async {
@@ -159,42 +167,158 @@ fn apply_event(state: &mut Trebuchet, event: ComponentEvent) -> Task<Message> {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
+/// One bounded batch at a time: visible results first, then background pages.
+/// Re-evaluate on each completion so typing/navigation can change priority.
+fn next_icon_indices(state: &Trebuchet) -> Vec<usize> {
+    let page_size = (state.config.columns * state.config.rows).max(1);
+    let visible: Vec<_> = if state.active == ActiveComponent::Launcher {
+        state
+            .launcher
+            .filtered
+            .iter()
+            .skip(state.launcher.page * page_size)
+            .take(page_size)
+            .copied()
+            .filter(|&index| state.icons_resolved.get(index) == Some(&false))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if !visible.is_empty() {
+        return visible;
+    }
+    state
+        .icons_resolved
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &resolved)| (!resolved).then_some(index))
+        .take(8)
+        .collect()
+}
+
+fn schedule_icons(state: &mut Trebuchet) -> Task<Message> {
+    if state.icons_loading {
+        return Task::none();
+    }
+    let indices = next_icon_indices(state);
+    if indices.is_empty() {
+        return Task::none();
+    }
+    state.icons_loading = true;
+    let generation = state.icon_generation;
+    let apps: Vec<_> = indices.iter().map(|&i| state.apps[i].clone()).collect();
+    Task::perform(
+        async move {
+            let count = apps.len();
+            let icons =
+                tokio::task::spawn_blocking(move || crate::launcher::resolve_all_icons(&apps))
+                    .await
+                    .unwrap_or_else(|_| vec![None; count]);
+            indices.into_iter().zip(icons).collect()
+        },
+        move |icons| Message::IconsLoaded(generation, icons),
+    )
+}
+
+fn replace_apps(state: &mut Trebuchet, mut apps: Vec<AppEntry>) {
+    // The common case: nothing changed. Keep in-flight work and navigation intact.
+    if state.apps.len() == apps.len()
+        && state
+            .apps
+            .iter()
+            .zip(&apps)
+            .all(|(old, new)| old.same_application(new))
+    {
+        return;
+    }
+    let selected = state
+        .launcher
+        .selected
+        .and_then(|i| state.launcher.filtered.get(i))
+        .and_then(|&i| state.apps.get(i))
+        .cloned();
+    let page = state.launcher.page;
+    let resolved = apps
+        .iter_mut()
+        .map(|app| {
+            if let Some(i) = state.apps.iter().position(|old| old.same_application(app)) {
+                app.icon = state.apps[i].icon.clone();
+                state.icons_resolved.get(i).copied().unwrap_or(false)
+            } else {
+                false
+            }
+        })
+        .collect();
+    state.apps = apps;
+    state.icons_resolved = resolved;
+    state.icon_generation += 1;
+    state.icons_loading = false;
+    let query = state.launcher.query.clone();
+    state.launcher.apply_filter(&state.apps, &query);
+    let page_size = (state.config.columns * state.config.rows).max(1);
+    state.launcher.page = page.min(state.launcher.filtered.len().saturating_sub(1) / page_size);
+    if let Some(selected) = selected {
+        state.launcher.selected = state
+            .launcher
+            .filtered
+            .iter()
+            .position(|&i| state.apps[i].same_application(&selected));
+        if let Some(i) = state.launcher.selected {
+            state.launcher.page = i / page_size;
+        }
+    }
+}
+
 pub fn update(state: &mut Trebuchet, msg: Message) -> Task<Message> {
+    let task = update_inner(state, msg);
+    Task::batch([task, schedule_icons(state)])
+}
+
+fn update_inner(state: &mut Trebuchet, msg: Message) -> Task<Message> {
     match msg {
         Message::Close => std::process::exit(0),
         Message::Absorb => {}
-
-        Message::AppsLoaded(apps) => {
-            state.launcher.reset(&apps);
-            state.apps = apps;
-            // Dispatch lazy icon resolution. The launcher is already fully
-            // usable (names + execs are known); icons stream in once the task
-            // completes via Message::IconsLoaded.
-            let apps_snapshot = state.apps.clone();
-            return Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || {
-                        crate::launcher::resolve_all_icons(&apps_snapshot)
-                    })
-                    .await
-                    .unwrap_or_default()
-                },
-                Message::IconsLoaded,
-            );
+        Message::InitialAppsLoaded(apps, cached) => {
+            replace_apps(state, apps);
+            if cached {
+                return Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(scan_and_cache_applications)
+                            .await
+                            .ok()
+                    },
+                    |apps| match apps {
+                        Some(apps) => Message::AppsLoaded(apps),
+                        None => Message::Absorb,
+                    },
+                );
+            }
         }
-
-        Message::IconsLoaded(icons) => {
-            // Apply each resolved icon to its app in-place. Length may differ
-            // if a re-scan raced (unlikely in practice); only update what we can.
-            for (idx, icon) in icons.into_iter().enumerate() {
+        Message::AppsLoaded(apps) => replace_apps(state, apps),
+        Message::IconsLoaded(generation, icons) => {
+            if generation != state.icon_generation {
+                return Task::none();
+            }
+            state.icons_loading = false;
+            for (idx, icon) in icons {
                 if let Some(app) = state.apps.get_mut(idx) {
                     app.icon = icon;
+                    if let Some(resolved) = state.icons_resolved.get_mut(idx) {
+                        *resolved = true;
+                    }
                 }
             }
         }
 
         Message::ConfigLoaded(config) => {
             state.config = config;
+            let page_size = (state.config.columns * state.config.rows).max(1);
+            state.launcher.page = state
+                .launcher
+                .selected
+                .map(|i| i / page_size)
+                .unwrap_or(state.launcher.page)
+                .min(state.launcher.filtered.len().saturating_sub(1) / page_size);
             // Cmd builds its filter from config.commands. If the user
             // navigated to /cmd before this message arrived, the filter was
             // built from the empty default — rebuild it now.
@@ -375,6 +499,9 @@ mod tests {
             cmd: Cmd::new(),
             settings: Settings::new(),
             window_mover: WindowMover::new(),
+            icon_generation: 0,
+            icons_resolved: Vec::new(),
+            icons_loading: false,
         }
     }
 
@@ -455,7 +582,10 @@ mod tests {
         // Pretend only the middle app resolved.
         let svg = iced::widget::svg::Handle::from_memory(vec![]);
         let icons = vec![None, Some(IconHandle::Vector(svg)), None];
-        let _ = update(&mut state, Message::IconsLoaded(icons));
+        let _ = update(
+            &mut state,
+            Message::IconsLoaded(0, icons.into_iter().enumerate().collect()),
+        );
 
         assert!(state.apps[0].icon.is_none());
         assert!(state.apps[1].icon.is_some(), "middle app should have icon");
@@ -469,7 +599,10 @@ mod tests {
         let mut state = test_state();
         state.apps = vec![app_entry("a")];
         let icons = vec![None, None, None];
-        let _ = update(&mut state, Message::IconsLoaded(icons));
+        let _ = update(
+            &mut state,
+            Message::IconsLoaded(0, icons.into_iter().enumerate().collect()),
+        );
         assert_eq!(state.apps.len(), 1);
     }
 
@@ -477,7 +610,130 @@ mod tests {
     fn icons_loaded_with_empty_vec_is_noop() {
         let mut state = test_state();
         state.apps = vec![app_entry("a"), app_entry("b")];
-        let _ = update(&mut state, Message::IconsLoaded(vec![]));
+        let _ = update(&mut state, Message::IconsLoaded(0, vec![]));
         assert!(state.apps.iter().all(|a| a.icon.is_none()));
+    }
+    fn populated_state(count: usize) -> Trebuchet {
+        let mut state = test_state();
+        state.config.columns = 2;
+        state.config.rows = 2;
+        replace_apps(
+            &mut state,
+            (0..count)
+                .map(|i| app_entry(&format!("App {i:02}")))
+                .collect(),
+        );
+        state
+    }
+
+    #[test]
+    fn first_page_precedes_background_icons() {
+        let mut state = populated_state(20);
+        assert_eq!(next_icon_indices(&state), vec![0, 1, 2, 3]);
+        state.icons_resolved[..4].fill(true);
+        assert_eq!(next_icon_indices(&state), (4..12).collect::<Vec<_>>());
+        state.icons_resolved.fill(true);
+        assert!(next_icon_indices(&state).is_empty());
+    }
+
+    #[test]
+    fn navigation_and_search_reprioritize_icons() {
+        let mut state = populated_state(20);
+        let _ = state
+            .launcher
+            .update(app_launcher::Msg::GoToPage(3), &state.apps, &state.config);
+        assert_eq!(next_icon_indices(&state), vec![12, 13, 14, 15]);
+        let _ = state.launcher.update(
+            app_launcher::Msg::QueryChanged("App 19".into()),
+            &state.apps,
+            &state.config,
+        );
+        assert_eq!(next_icon_indices(&state), vec![19]);
+    }
+
+    #[test]
+    fn stale_icon_results_cannot_overwrite_refreshed_catalogue() {
+        let mut state = populated_state(4);
+        let generation = state.icon_generation;
+        replace_apps(&mut state, vec![app_entry("New app")]);
+        state.icons_loading = true;
+        let svg = iced::widget::svg::Handle::from_memory(vec![]);
+        let _ = update_inner(
+            &mut state,
+            Message::IconsLoaded(
+                generation,
+                vec![(0, Some(crate::icons::IconHandle::Vector(svg)))],
+            ),
+        );
+        assert!(state.apps[0].icon.is_none());
+        assert!(
+            state.icons_loading,
+            "old completion must not clear new batch"
+        );
+    }
+
+    #[test]
+    fn refresh_preserves_search_selection_and_resolved_icons() {
+        let mut state = populated_state(20);
+        state.launcher.query = "App".into();
+        state.launcher.apply_filter(&state.apps, "App");
+        state.launcher.selected = Some(13);
+        state.launcher.page = 3;
+        let selected = state.apps[13].clone();
+        state.icons_resolved[13] = true;
+        state.apps[13].icon = Some(crate::icons::IconHandle::Vector(
+            iced::widget::svg::Handle::from_memory(vec![]),
+        ));
+        let mut apps = state.apps.clone();
+        apps.insert(0, app_entry("Another App"));
+        replace_apps(&mut state, apps);
+        assert_eq!(state.launcher.query, "App");
+        let index = state.launcher.filtered[state.launcher.selected.unwrap()];
+        assert!(state.apps[index].same_application(&selected));
+        assert!(state.apps[index].icon.is_some());
+        assert!(state.icons_resolved[index]);
+        assert_eq!(state.launcher.page, state.launcher.selected.unwrap() / 4);
+    }
+
+    #[test]
+    fn unchanged_refresh_keeps_inflight_batch() {
+        let mut state = populated_state(4);
+        state.icons_loading = true;
+        let generation = state.icon_generation;
+        let apps = state.apps.clone();
+        replace_apps(&mut state, apps);
+        assert_eq!(state.icon_generation, generation);
+        assert!(state.icons_loading);
+    }
+
+    #[test]
+    fn missing_icons_are_completed_without_retrying_forever() {
+        let mut state = populated_state(4);
+        let generation = state.icon_generation;
+        let _ = update_inner(
+            &mut state,
+            Message::IconsLoaded(generation, vec![(3, None), (1, None), (0, None), (2, None)]),
+        );
+        assert!(next_icon_indices(&state).is_empty());
+    }
+
+    #[test]
+    fn refresh_removal_clamps_page_and_clears_removed_selection() {
+        let mut state = populated_state(20);
+        state.launcher.page = 4;
+        state.launcher.selected = Some(19);
+        replace_apps(&mut state, vec![app_entry("Remaining")]);
+        assert_eq!(state.launcher.page, 0);
+        assert_eq!(state.launcher.selected, None);
+    }
+
+    #[test]
+    fn custom_page_size_changes_visible_priority() {
+        let mut state = populated_state(20);
+        let mut config = state.config.clone();
+        config.columns = 3;
+        config.rows = 2;
+        let _ = update_inner(&mut state, Message::ConfigLoaded(config));
+        assert_eq!(next_icon_indices(&state), (0..6).collect::<Vec<_>>());
     }
 }

@@ -358,3 +358,24 @@ previously loaded value is kept.
 fails to compile against beta.3's non-exhaustive `NativeKeyCode` enum. This also
 keeps `winit-common` on beta.2. Remove the constraint when the layer-shell stack
 supports the newer API. Build with `--locked` to use the checked-in dependency set.
+
+
+### Startup catalogue and visible-page priority
+
+`launcher.rs` persists versioned app metadata (names, parsed argument vectors,
+terminal flags and icon names) in `$XDG_CACHE_HOME/trebuchet/applications.json`,
+falling back to `~/.cache`. Runtime icon handles are never serialized. Writes use
+an atomic rename; missing, corrupt or incompatible caches trigger a normal scan.
+A cached catalogue is immediately searchable and launchable while the desktop
+entries are rescanned in the background. Consequently a recently removed or
+changed application may briefly reflect its previous entry until refresh ends.
+
+`app.rs` resolves icons for the current visible page first, then handles remaining
+icons in batches of eight. Each batch completion rechecks the current page and
+search results, so user navigation takes priority over remaining background work.
+An in-flight batch finishes before changing priority. Failed icon lookups count
+as resolved and retain the existing fallback. Catalogue generations discard late
+results after a changed scan; unchanged scans preserve in-flight work. Refreshes
+preserve query and application selection, carry over unchanged resolved icons,
+and clamp pagination after removals. The first run without a catalogue cache
+still scans desktop entries before displaying the list.
